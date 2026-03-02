@@ -35,14 +35,15 @@ class SetupWizard(tk.Toplevel):
         p2 = self.confirm_entry.get()
 
         if len(p1) < 8:
-            messagebox.showerror("Ошибка", "Пароль должен быть не короче 8 символов!")
+            messagebox.showerror("Ошибка", "Пароль слишком короткий (мин. 8 символов)")
             return
 
-        if p1 != p2:
-            messagebox.showerror("Ошибка", "Пароли не совпадают!")
-            return
+        if p1 == p2:
+            # ПРОВЕРЬ ЭТУ СТРОЧКУ:
+            self.parent.db_helper.save_master_password(p1)
+            messagebox.showinfo("Успех", "Мастер-пароль установлен!")
 
-        # СОХРАНЯЕМ В БАЗУ (то, чего нам не хватало)
-        self.parent.db_helper.save_master_password(p1)
-        messagebox.showinfo("Успех", "Мастер-пароль успешно установлен!")
-        self.destroy()
+            # Закрываем окно и даем сигнал MainWindow
+            self.destroy()
+        else:
+            messagebox.showerror("Ошибка", "Пароли не совпадают")

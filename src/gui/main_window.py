@@ -12,36 +12,26 @@ from src.gui.login_window import LoginWindow  # Импортируем окно 
 
 
 class MainWindow(tk.Tk):
+    # src/gui/main_window.py (метод __init__)
     def __init__(self):
         super().__init__()
         self.title("CryptoSafe Password Manager")
         self.geometry("1000x650")
 
         self.db_helper = DatabaseHelper()
-        self.km = KeyManager()
-        self.current_master_password = None  # Изначально пароля нет
+        self.current_master_password = None
 
-        # Скрываем главное окно пока идет логин
-        self.withdraw()
-
-        # 1. Меню
+        # 1. Сначала инициализируем все элементы
         self.create_app_menu()
-
-        # 2. Панель инструментов
         self.create_toolbar()
-
-        # 3. Таблица
         self.create_table_area()
-
-        # 4. Статус-бар
         self.create_status_bar()
 
-        # 5. Проверки первого запуска и логина
+        # 2. Потом делаем проверки первого запуска
         self.check_first_run()
 
-        # Показываем окно после успешного логина
+        # 3. ТОЛЬКО ТЕПЕРЬ ПОКАЗЫВАЕМ ОКНО
         self.deiconify()
-        self.show_login_window()
 
     def show_login_window(self):
         """Вызывает окно логина (Привязка функций!)"""
@@ -128,9 +118,19 @@ class MainWindow(tk.Tk):
     # --- ЛОГИКА И ФУНКЦИИ (BINDING) ---
 
     def check_first_run(self):
-        """Проверка первого запуска (ГИ-3)"""
+        """Проверка первого запуска"""
         if not self.db_helper.get_setting("master_salt"):
-            SetupWizard(self)
+            wizard = SetupWizard(self)
+            self.wait_window(wizard)  # Ждем строго до закрытия окна
+
+        # ПРОВЕРКА: Если после визарда соль так и не появилась - значит была ошибка
+        if not self.db_helper.get_setting("master_salt"):
+            messagebox.showerror("Ошибка", "Мастер-пароль не был сохранен!")
+            self.destroy()
+            return
+
+        self.deiconify()
+        self.show_login_window()
 
     def open_settings(self):
         """Открыть настройки (ГИ-4)"""
