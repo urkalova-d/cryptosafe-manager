@@ -1,4 +1,10 @@
 # src/core/events.py
+from enum import Enum, auto
+
+class EventType(Enum):
+    SETTINGS_CHANGED = auto()  # Тот самый пропущенный пункт
+    DATABASE_UPDATED = auto()
+    AUTH_SUCCESS = auto()
 
 class EventBus:
     def __init__(self):
@@ -9,10 +15,10 @@ class EventBus:
             self.subscribers[event_type] = []
         self.subscribers[event_type].append(callback)
 
-    def emit(self, event_type, data=None):
+    def publish(self, event_type, data=None):
         if event_type in self.subscribers:
             for callback in self.subscribers[event_type]:
                 callback(data)
 
-# Создаем глобальный экземпляр для всего приложения
-bus = EventBus()
+# Создаем глобальный объект шины событий
+event_bus = EventBus()

@@ -1,15 +1,16 @@
-import ctypes
+# src/core/crypto/abstract.py
+from abc import ABC, abstractmethod
 
-class EncryptionService:
+
+class EncryptionService(ABC):
+    """Абстрактный класс для всех сервисов шифрования"""
+
+    @abstractmethod
     def encrypt(self, data: bytes, key: bytes) -> bytes:
-        raise NotImplementedError
+        """Метод шифрования данных"""
+        pass
 
+    @abstractmethod
     def decrypt(self, ciphertext: bytes, key: bytes) -> bytes:
-        raise NotImplementedError
-
-    @staticmethod
-    def wipe_memory(variable):
-        """Затирает данные в памяти (best effort для Python)"""
-        if isinstance(variable, bytearray):
-            for i in range(len(variable)):
-                variable[i] = 0
+        """Метод дешифрования данных"""
+        pass

@@ -9,5 +9,3 @@ class SecureTable(ttk.Treeview):
         self.heading("username", text="Логин")
         self.heading("password", text="Пароль")
 
-        # Добавим тестовую строку (заполнитель)
-        self.insert("", "end", values=("Google", "darya@mail.ru", "********"))
