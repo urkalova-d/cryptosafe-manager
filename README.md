@@ -1,4 +1,4 @@
-# CryptoSafe Manager 🛡
+# CryptoSafe Manager 
 
 **CryptoSafe Manager** — это кроссплатформенный менеджер паролей с графическим интерфейсом на базе Tkinter. Проект ориентирован на максимальную безопасность: локальная база данных SQLite хранит только зашифрованные данные, а работа с конфиденциальной информацией (например, буфером обмена) строго регламентирована.
 
@@ -14,39 +14,40 @@
 
 Проект построен по итеративной модели (8 спринтов). Ниже представлена схема взаимодействия компонентов:
 
+
+
 ```mermaid
 graph TD
-    subgraph VIEW [VIEW - GUI Interface]
+    subgraph VIEW [GUI Interface]
         LW[login_window]
         MW[main_window]
         ARW[add_record_window]
         SD[settings_dialog]
     end
 
-    subgraph CONTROLLER [CONTROLLER - Logic Layer]
+    subgraph CONTROLLER [Logic Layer]
         SM[state_manager]
         EV[events]
         AL[audit_logger]
         KM[key_manager]
     end
 
-    subgraph CRYPTO [CRYPTO - Security Layer]
+    subgraph CRYPTO [Security Layer]
         ES[EncryptionService abstract]
         AP[AES256Placeholder]
     end
 
-    subgraph MODEL [MODEL - Data Layer]
+    subgraph MODEL [Data Layer]
         DB[db.py]
         MOD[models.py]
     end
 
-    VIEW -- user actions --> CONTROLLER
-    CONTROLLER -- encryption requests --> CRYPTO
-    CRYPTO -- store / load data --> MODEL
+    VIEW -->|user actions| CONTROLLER
+    CONTROLLER -->|encryption requests| CRYPTO
+    CRYPTO -->|store and load data| MODEL
 
-
- Дорожная карта разработки (Sprints)
-Sprint 1 — Project Architecture and Setup
+## Дорожная карта разработки (Sprints)
+ **Sprint 1 — Project Architecture and Setup**
 Цель: Создание каркаса и определение архитектуры.
 
 Настройка репозитория и структуры проекта.
@@ -57,8 +58,8 @@ Sprint 1 — Project Architecture and Setup
 
 Результат: Рабочий модульный каркас приложения.
 
- Sprint 2 — Threat Modeling and Security Design
-Цель: Определение угроз и проектирование защиты.
+ **Sprint 2 — Threat Modeling and Security Design**
+Цель: Определение угрозов и проектирование защиты.
 
 Анализ моделей атак и выявление уязвимостей.
 
@@ -68,9 +69,9 @@ Sprint 1 — Project Architecture and Setup
 
 Результат: Стратегия защиты и подробная модель угроз.
 
-Проект продолжается в рамках последующих 6 спринтов до полной реализации системы аудита и анализа безопасности.
 
-📁 Структура проекта
+
+## Структура проекта
 Plaintext
 
 cryptosafe-manager
@@ -105,40 +106,24 @@ cryptosafe-manager
     ├ test_database.py
     ├ test_integration.py
     └ test_modules.py
- Установка и запуск
+ ##Установка и запуск
 1. Клонирование репозитория
-Bash
-
 git clone [https://github.com/urkalova-d/cryptosafe-manager.git](https://github.com/urkalova-d/cryptosafe-manager.git)
 cd cryptosafe-manager
+
 2. Создание виртуального окружения
 Windows:
-
-Bash
 
 python -m venv venv
 venv\Scripts\activate
 Linux / Mac:
 
-Bash
-
 python3 -m venv venv
 source venv/bin/activate
-3. Установка зависимостей и запуск
-Bash
 
+3. Установка зависимостей и запуск
 pip install -r requirements.txt
 python main.py
-🧪 Тестирование
+ Тестирование
 Для запуска набора unit-тестов используйте команду:
-
-Bash
-
 pytest
-Покрытие тестами:
-
-Криптографический модуль (шифрование/дешифрование).
-
-База данных (CRUD операции, PRAGMA).
-
-Интеграция компонентов и системные модули.
