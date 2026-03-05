@@ -73,8 +73,7 @@ graph TD
 
 
 ## Структура проекта
-Plaintext
-
+```
 cryptosafe-manager
 │
 ├ main.py                   # Точка входа в приложение
@@ -107,6 +106,7 @@ cryptosafe-manager
     ├ test_database.py
     ├ test_integration.py
     └ test_modules.py
+```
  ##Установка и запуск
 1. Клонирование репозитория
 ```bash
