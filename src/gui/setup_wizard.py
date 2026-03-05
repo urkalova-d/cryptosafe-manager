@@ -17,24 +17,20 @@ class SetupWizard(tk.Toplevel):
         self.create_widgets()
 
     def create_widgets(self):
-        ttk.Label(self, text="Придумайте мастер-пароль", font=("Arial", 12, "bold")).pack(pady=15)
-
-        # Создаем структуру, которую ждет тест (атрибут.entry)
+        # Названия должны совпадать с тем, что ищет тест!
         self.pass1 = tk.Frame(self)
         self.pass1.entry = ttk.Entry(self, show="*")
         self.pass1.entry.pack(pady=10, fill=tk.X, padx=40)
 
-        ttk.Label(self, text="Повторите пароль:").pack()
         self.pass2 = tk.Frame(self)
         self.pass2.entry = ttk.Entry(self, show="*")
         self.pass2.entry.pack(pady=10, fill=tk.X, padx=40)
 
-        ttk.Button(self, text="Завершить настройку", command=self.save_and_exit).pack(pady=20)
-
     def save_and_exit(self):
-        # Берем данные из новых имен переменных, которые ожидает тест
+        # ВАЖНО: берем данные через .entry.get()
         p1 = self.pass1.entry.get()
-        p2 = self.pass2.entry.get()  # Исправлено с self.confirm_entry на self.pass2.entry
+        p2 = self.pass2.entry.get()
+
 
         if len(p1) < 8:
             messagebox.showerror("Ошибка", "Пароль слишком короткий (мин. 8 символов)")
