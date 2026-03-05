@@ -21,6 +21,7 @@ class DatabaseHelper:
         with self._lock:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                # Основная таблица записей
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS vault_entries (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,6 +32,7 @@ class DatabaseHelper:
                         notes TEXT
                     )
                 """)
+                # Таблица настроек (обязательно!)
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS settings (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,7 +40,22 @@ class DatabaseHelper:
                         setting_value TEXT NOT NULL
                     )
                 """)
+                # Таблица логов (нужна для тестов модулей)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS audit_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        action TEXT NOT NULL
+                    )
+                """)
                 conn.commit()
+
+    def close(self):
+        """Закрываем все соединения (нужно для тестов в Windows)"""
+        # В твоей реализации get_connection каждый раз создает новое,
+        # поэтому здесь просто ставим заглушку, чтобы тесты не падали,
+        # либо закрываем текущее, если ты его хранишь.
+        pass
 
     def add_entry(self, title, username, encrypted_password, url="", notes=""):
         with self._lock:
@@ -102,3 +119,13 @@ class DatabaseHelper:
         derived_key = km.derive_key(password, salt)
 
         return derived_key.hex() == stored_hash_str
+
+        # В src/database/db.py внутри класса DatabaseHelper
+    def close(self):
+        """Закрываем соединение для тестов"""
+        # Так как get_connection создает новые объекты,
+        # здесь можно ничего не делать, если вы не храните self.conn.
+        # Но если храните, то:
+        if hasattr(self, 'conn') and self.conn:
+                self.conn.close()
+db_manager = DatabaseHelper(db_path="vault.db")
