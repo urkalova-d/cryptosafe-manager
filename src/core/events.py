@@ -1,11 +1,11 @@
-# src/core/events.py
+
 from enum import Enum, auto
 
 class EventType(Enum):
-    SETTINGS_CHANGED = auto()  # Тот самый пропущенный пункт
+    SETTINGS_CHANGED = auto()
     DATABASE_UPDATED = auto()
     AUTH_SUCCESS = auto()
-
+    ENTRY_ADDED = auto()  # Добавляем для прохождения теста test_event_bus_publishing
 class EventBus:
     def __init__(self):
         self.subscribers = {}
