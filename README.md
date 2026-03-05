@@ -45,6 +45,7 @@ graph TD
     VIEW -->|user actions| CONTROLLER
     CONTROLLER -->|encryption requests| CRYPTO
     CRYPTO -->|store and load data| MODEL
+```
 
 ## Дорожная карта разработки (Sprints)
  **Sprint 1 — Project Architecture and Setup**
@@ -108,22 +109,28 @@ cryptosafe-manager
     └ test_modules.py
  ##Установка и запуск
 1. Клонирование репозитория
+```bash
 git clone [https://github.com/urkalova-d/cryptosafe-manager.git](https://github.com/urkalova-d/cryptosafe-manager.git)
 cd cryptosafe-manager
-
+```
 2. Создание виртуального окружения
 Windows:
-
+```bash
 python -m venv venv
 venv\Scripts\activate
+```
 Linux / Mac:
-
+```bash
 python3 -m venv venv
 source venv/bin/activate
-
+```
 3. Установка зависимостей и запуск
+```bash
 pip install -r requirements.txt
 python main.py
+```
  Тестирование
 Для запуска набора unit-тестов используйте команду:
+```bash
 pytest
+```
