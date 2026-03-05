@@ -3,11 +3,15 @@ import pytest
 from unittest.mock import MagicMock
 from src.gui.main_window import MainWindow
 from src.gui.setup_wizard import SetupWizard
-from config import DevelopmentConfig
+from src.core.config import Config
 
+
+# tests/test_integration.py
+from src.core.config import DevelopmentConfig, Config
 
 def test_config_loading():
     """Проверка загрузки конфигурации (CFG-3)"""
+    # Если ты хочешь проверить именно класс DevelopmentConfig:
     config = DevelopmentConfig()
     assert config.DEBUG is True
     assert config.DB_PATH == "dev_vault.db"
