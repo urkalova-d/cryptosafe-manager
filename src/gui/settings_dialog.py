@@ -1,41 +1,24 @@
-# src/gui/settings_dialog.py
-import tkinter as tk
-from tkinter import ttk
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QCheckBox, QPushButton, QLabel
 
 
-class SettingsDialog(tk.Toplevel):
-    def __init__(self, parent):
+class SettingsDialog(QDialog):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.title("Настройки")
-        self.geometry("500x400")
-        self.transient(parent)
-        self.grab_set()
+        self.setWindowTitle("Настройки")
+        self.setFixedSize(300, 200)
 
-        self.create_widgets()
+        layout = QVBoxLayout()
 
-    def create_widgets(self):
-        tab_control = ttk.Notebook(self)
+        layout.addWidget(QLabel("Конфигурация приложения:"))
 
-        # Вкладки (ГИ-4)
-        security_tab = ttk.Frame(tab_control)
-        appearance_tab = ttk.Frame(tab_control)
-        advanced_tab = ttk.Frame(tab_control)
+        self.dark_mode = QCheckBox("Темная тема")
+        layout.addWidget(self.dark_mode)
 
-        tab_control.add(security_tab, text='Безопасность')
-        tab_control.add(appearance_tab, text='Внешний вид')
-        tab_control.add(advanced_tab, text='Расширенные')
+        self.auto_lock = QCheckBox("Автоблокировка (5 мин)")
+        layout.addWidget(self.auto_lock)
 
-        tab_control.pack(expand=1, fill="both")
+        btn_close = QPushButton("Закрыть")
+        btn_close.clicked.connect(self.accept)
+        layout.addWidget(btn_close)
 
-        # Наполнение Вкладки Безопасность (ГИ-4)
-        ttk.Label(security_tab, text="Время ожидания буфера (с):").pack(pady=10)
-        ttk.Spinbox(security_tab, from_=5, to=60).pack()
-        ttk.Checkbutton(security_tab, text="Автоматическая блокировка").pack(pady=10)
-
-        # Наполнение Вкладки Внешний вид (ГИ-4)
-        ttk.Label(appearance_tab, text="Тема:").pack(pady=10)
-        ttk.Combobox(appearance_tab, values=["Light", "Dark"]).pack()
-
-        # Наполнение Вкладки Расширенные (ГИ-4)
-        ttk.Button(advanced_tab, text="Экспорт БД", command=lambda: print("Экспорт")).pack(pady=10)
-        ttk.Button(advanced_tab, text="Резервная копия", command=lambda: print("Бэкап")).pack(pady=10)
+        self.setLayout(layout)

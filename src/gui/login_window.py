@@ -1,40 +1,30 @@
-# src/gui/login_window.py
-import tkinter as tk
-from tkinter import ttk, messagebox
-from src.gui.widgets.password_entry import PasswordEntry
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox
+from PyQt6.QtCore import pyqtSignal
 
+class LoginWindow(QDialog):
+    login_attempt = pyqtSignal(str)
 
-class LoginWindow(tk.Toplevel):
-    def __init__(self, parent, check_password_callback):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.title("Вход")
-        self.geometry("300x200")
-        self.check_password_callback = check_password_callback
+        self.setWindowTitle("Вход в систему")
+        self.setFixedSize(300, 150)
+        self.setModal(True)
 
-        # Модальное окно (блокирует родительское)
-        self.transient(parent)
-        self.grab_set()
+        layout = QVBoxLayout()
 
-        self.create_widgets()
+        layout.addWidget(QLabel("Введите мастер-пароль:"))
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        layout.addWidget(self.password_input)
 
-    def create_widgets(self):
-        ttk.Label(self, text="Введите мастер-пароль", font=("Arial", 11)).pack(pady=20)
+        self.btn_login = QPushButton("Войти")
+        self.btn_login.clicked.connect(self.handle_login)
+        layout.addWidget(self.btn_login)
 
-        self.password_entry = PasswordEntry(self)
-        self.password_entry.pack(fill=tk.X, padx=20)
-        self.password_entry.focus_set()
+        self.setLayout(layout)
 
-        ttk.Button(self, text="Войти", command=self.check_password).pack(pady=20)
-
-        # Закрытие программы при закрытии окна логина
-        self.protocol("WM_DELETE_WINDOW", self.parent_quit)
-
-    def check_password(self):
-        password = self.password_entry.get()
-        if self.check_password_callback(password):
-            self.destroy()  # Закрываем окно логина
-        else:
-            messagebox.showerror("Ошибка", "Неверный мастер-пароль!")
-
-    def parent_quit(self):
-        self.master.quit()
+    def handle_login(self):
+        password = self.password_input.text()
+        if password:
+            self.login_attempt.emit(password)
+            self.accept()
