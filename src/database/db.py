@@ -1,8 +1,7 @@
 import sqlite3
+import hashlib
+import os
 from threading import Lock
-from tkinter import messagebox
-from src.core.events import event_bus, EventType
-from src.core.key_manager import KeyManager
 
 class DatabaseHelper:
     def __init__(self, db_path="vault.db"):
@@ -23,10 +22,9 @@ class DatabaseHelper:
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS vault_entries (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        title TEXT NOT NULL,
+                        service TEXT NOT NULL,
                         username TEXT,
                         encrypted_password TEXT NOT NULL,
-                        url TEXT,
                         notes TEXT
                     )
                 """)
@@ -38,37 +36,7 @@ class DatabaseHelper:
                         setting_value TEXT NOT NULL
                     )
                 """)
-                # таблица логов(для тестов модулей)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS audit_log (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        action TEXT NOT NULL
-                    )
-                """)
                 conn.commit()
-
-    def close(self):
-        # закрытие все соединения (нужно для тестов в windows)
-        pass
-
-    def add_entry(self, title, username, encrypted_password, url="", notes=""):
-        with self._lock:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO vault_entries (title, username, encrypted_password, url, notes)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (title, username, encrypted_password, url, notes))
-                conn.commit()
-                return cursor.lastrowid
-
-    def get_all_entries(self):
-        with self._lock:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT * FROM vault_entries")
-                return cursor.fetchall()
 
     def save_setting(self, key, value):
         with self._lock:
@@ -86,36 +54,55 @@ class DatabaseHelper:
                 cursor = conn.cursor()
                 cursor.execute("SELECT setting_value FROM settings WHERE setting_key = ?", (key,))
                 result = cursor.fetchone()
-                return result[0] if result else None
-
+                return result["setting_value"] if result else None
 
     def save_master_password(self, password):
-        # хеширует пароль и сохраняет соль и хеш в бд
-        km = KeyManager()
-        # генерация ключа(соль создается автоматически внутри km)
-        derived_key = km.derive_key(password)
+        #  сохранение мастерпароля с хешированием и солью
+        salt = os.urandom(16).hex()  # Генерация соли
+        # хеширование
+        payload = (password + salt).encode('utf-8')
+        password_hash = hashlib.sha256(payload).hexdigest()
 
-        self.save_setting("master_salt", km.salt.hex())
-        self.save_setting("master_hash", derived_key.hex())
-        event_bus.publish(EventType.SETTINGS_CHANGED, "Master password set")
+        #сохранение хеша и соли
+        self.save_setting("master_hash", password_hash)
+        self.save_setting("master_salt", salt)
 
     def verify_master_password(self, password):
-        #проверка введеного пароля
-        salt_str = self.get_setting("master_salt")
-        stored_hash_str = self.get_setting("master_hash")
+        # проверка введенного пароля
+        stored_hash = self.get_setting("master_hash")
+        salt = self.get_setting("master_salt")
 
-        if not salt_str or not stored_hash_str:
+        if not stored_hash or not salt:
             return False
 
-        km = KeyManager()
-        salt = bytes.fromhex(salt_str)
-        # генерирование ключа с той же солью
-        derived_key = km.derive_key(password, salt)
+        #повторение процесса хеширования с введенным паролем
+        payload = (password + salt).encode('utf-8')
+        input_hash = hashlib.sha256(payload).hexdigest()
 
-        return derived_key.hex() == stored_hash_str
+        return input_hash == stored_hash
+
+    def add_entry(self, service, username, encrypted_password, notes=""):
+        with self._lock:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO vault_entries (service, username, encrypted_password, notes)
+                    VALUES (?, ?, ?, ?)
+                """, (service, username, encrypted_password, notes))
+                conn.commit()
+                return cursor.lastrowid
+
+    def get_all_entries(self):
+        with self._lock:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM vault_entries")
+
+                return [dict(row) for row in cursor.fetchall()]
 
     def close(self):
-        # Закрываем соединение для тестов
         if hasattr(self, 'conn') and self.conn:
-                self.conn.close()
+            self.conn.close()
+
+# создание глобального экземпляра
 db_manager = DatabaseHelper(db_path="vault.db")
