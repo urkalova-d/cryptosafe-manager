@@ -1,51 +1,42 @@
-import pytest
+import unittest
 import os
 from src.database.db import DatabaseHelper
 
 
-@pytest.fixture
-def temp_db():
-    test_db_path = "test_vault.db"
-    # Перед созданием убедимся, что старый файл удален
-    if os.path.exists(test_db_path):
-        try:
-            os.remove(test_db_path)
-        except:
-            pass
+class TestDatabase(unittest.TestCase):
+    def setUp(self):
+        self.db_path = "test_vault.db"
+        self.db = DatabaseHelper(self.db_path)
 
-    helper = DatabaseHelper(db_path=test_db_path)
-    yield helper
+    def tearDown(self):
+        import time
+        self.db.close()
+        time.sleep(0.2)  # Даем Windows время освободить дескриптор файла
+        if os.path.exists(self.db_path):
+            try:
+                os.remove(self.db_path)
+            except PermissionError:
+                pass
 
-    # Явно закрываем, если helper хранит соединение
-    helper.close()
+    def test_master_password_flow(self):
+        #Проверка хеширования и соли
+        password = "secure_master_123"
+        self.db.save_master_password(password)
 
-    # Даем системе небольшую паузу (иногда Windows не успевает)
-    import time
-    time.sleep(0.1)
+        # прроверка,что соль создана
+        salt = self.db.get_setting("master_salt")
+        self.assertIsNotNone(salt)
 
-    if os.path.exists(test_db_path):
-        try:
-            os.remove(test_db_path)
-        except:
-            pass
+        #проверка верификации
+        self.assertTrue(self.db.verify_master_password(password))
+        self.assertFalse(self.db.verify_master_password("wrong_password"))
 
+    def test_entry_persistence(self):
+        # проверка сохранения и извлечения записей
+        self.db.add_entry("Yandex", "daria_dev", "pass789", "Test note")
 
-def test_init_db(temp_db):
-    """Проверка создания таблиц"""
-    conn = temp_db.get_connection()
-    cursor = conn.cursor()
-
-    # Проверяем наличие таблицы vault_entries
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='vault_entries'")
-    assert cursor.fetchone() is not None
-
-
-def test_add_and_get_entry(temp_db):
-    """Проверка записи и чтения (Пункт 2 ТЗ)"""
-    temp_db.add_entry("Google", "user@gmail.com", "encrypted_blob_here")
-    entries = temp_db.get_all_entries()
-
-    assert len(entries) == 1
-    assert entries[0]['title'] == "Google"
-    # Проверяем, что пароль хранится в том виде, в котором пришел (уже зашифрованным)
-    assert entries[0]['encrypted_password'] == "encrypted_blob_here"
+        records = self.db.get_all_entries()
+        self.assertEqual(len(records), 1)
+        # Проверка доступа через ключи
+        self.assertEqual(records[0]['service'], "Yandex")
+        self.assertEqual(records[0]['notes'], "Test note")

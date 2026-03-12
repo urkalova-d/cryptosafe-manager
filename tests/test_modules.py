@@ -1,23 +1,23 @@
-# tests/test_modules.py
 import pytest
 from src.database.db import DatabaseHelper
 from src.core.crypto.placeholder import AES256Placeholder
 from src.core.events import event_bus, EventType
 
-
-def test_db_schema_creation(db_helper):
-    """Проверка создания таблиц (ДБ-1)"""
+def test_db_schema_actual(db_helper):
+    #Проверка,что колонки в базе соответствуют коду
     conn = db_helper.get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-    tables = [row[0] for row in cursor.fetchall()]
-    assert "vault_entries" in tables
-    assert "audit_log" in tables
+
+    # проверка структуры таблицы
+    cursor.execute("PRAGMA table_info(vault_entries)")
+    columns = [row[1] for row in cursor.fetchall()]
+
+    assert "service" in columns
+    assert "encrypted_password" in columns
     conn.close()
 
-
 def test_encryption_decryption():
-    """Проверка XOR (КРИК-2)"""
+    #Проверка XOR
     crypto = AES256Placeholder()
     key = b"secret_key"
     data = b"my_password"
@@ -30,7 +30,7 @@ def test_encryption_decryption():
 
 
 def test_event_bus_publishing():
-    """Проверка системы событий (ЭВТ-1)"""
+    #Проверка системы событий
     received_data = []
 
     def callback(data):
