@@ -49,5 +49,5 @@ jobs:
 
     - name: Run tests with xvfb
       run: |
-        # Запускаем pytest через xvfb-run, чтобы GUI тесты не падали
+        export QT_DEBUG_PLUGINS=1
         xvfb-run --auto-servernum pytest
