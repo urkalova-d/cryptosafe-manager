@@ -1,198 +1,264 @@
+import sys
+from PyQt6.QtGui import QAction
 
-import tkinter as tk
-from tkinter import ttk, messagebox
 from src.database.db import DatabaseHelper
-from src.core.key_manager import KeyManager
-from src.core.crypto.placeholder import AES256Placeholder
+from src.gui.setup_wizard import SetupWizard
 from src.gui.add_record_window import AddRecordWindow
 from src.gui.widgets.secure_table import SecureTable
-from src.gui.setup_wizard import SetupWizard
-from src.gui.settings_dialog import SettingsDialog
-from src.gui.login_window import LoginWindow
+from PyQt6.QtCore import Qt, QTimer
+
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox,
+                             QTableWidget, QTableWidgetItem, QHeaderView,
+                             QMenuBar, QMenu, QStatusBar, QToolBar, QLabel)
 
 
-class MainWindow(tk.Tk):
+class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.title("CryptoSafe Password Manager")
-        self.geometry("1000x650")
+        self.setWindowTitle("CryptoSafe Password Manager")
+        self.resize(1000, 650)
 
-        self.db_helper = DatabaseHelper()
+        # инициализация базы данных и переменных
+        from src.database.db import db_manager
+        self.db_helper = db_manager
         self.current_master_password = None
 
-        # 1сначала инициализируются все элементы
+        # настройка таймера очистки
+        self.clipboard_timer = QTimer()
+        self.clipboard_timer.timeout.connect(self.update_timer_label)
+        self.remaining_time = 0
+
+        # построение интерфейса
+        self.init_ui()
+
+        QTimer.singleShot(100, self.check_first_run)
+    def init_ui(self):  #Инициализация всех графических компонентов
+
+        #центральный виджет
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.main_layout = QVBoxLayout(self.central_widget)
+
+        # создание компонентов по порядку
         self.create_app_menu()
         self.create_toolbar()
         self.create_table_area()
         self.create_status_bar()
-
-        # 2делаются проверки первого запуска
-        self.check_first_run()
-
-        #3 показ окна(после выполнения команд выше)
-        self.deiconify()
-
-    def show_login_window(self):
-        LoginWindow(self, self.check_password)# вызыв окна логина
-
-    def check_password(self, password):
-        # проверка пароля через базу данных
-        if self.db_helper.verify_master_password(password):
-            self.current_master_password = password
-            self.load_data()
-            return True
-        else:
-            return False
+        self.start_clipboard_timer(30)
 
     def create_app_menu(self):
-         #панель меню
-        menu_bar = tk.Menu(self)
-        self.config(menu=menu_bar)
 
-        # Файл
-        file_menu = tk.Menu(menu_bar, tearoff=0)
-        file_menu.add_command(label="Создать", command=lambda: print("Создать"))
-        file_menu.add_command(label="Открыть", command=lambda: print("Открыть"))
-        file_menu.add_separator()
-        file_menu.add_command(label="Создать резервную копию", command=lambda: print("Резервная копия"))
-        file_menu.add_separator()
-        file_menu.add_command(label="Выход", command=self.quit)
-        menu_bar.add_cascade(label="Файл", menu=file_menu)
+        menubar = self.menuBar()
 
-        # измкнения
-        edit_menu = tk.Menu(menu_bar, tearoff=0)
-        edit_menu.add_command(label="Добавить", command=self.open_add_window)
-        edit_menu.add_command(label="Редактировать", command=lambda: print("Редактировать"))
-        edit_menu.add_command(label="Удалить выбранное", command=self.delete_selected)
-        menu_bar.add_cascade(label="Правка", menu=edit_menu)
+        # файл
+        file_menu = menubar.addMenu("Файл")
+        file_menu.addAction("Создать")
+        file_menu.addAction("Открыть")
+        file_menu.addAction("Резервное копирование")
+        file_menu.addSeparator()
+        exit_action = file_menu.addAction("Выход")
+        exit_action.triggered.connect(self.close)
 
-        #просмотр
-        view_menu = tk.Menu(menu_bar, tearoff=0)
-        view_menu.add_command(label="Журналы", command=lambda: print("Журналы"))
-        view_menu.add_command(label="Настройки", command=self.open_settings)
-        menu_bar.add_cascade(label="Просмотр", menu=view_menu)
+        # редактирование
+        edit_menu = menubar.addMenu("Редактирование")
+        add_action = edit_menu.addAction("Добавить")
+        add_action.triggered.connect(self.open_add_window)
+        edit_menu.addAction("Редактировать")
+        edit_menu.addAction("Удалить")
+
+        # просмотр
+        view_menu = menubar.addMenu("Просмотр")
+        view_menu.addAction("Журналы")
+        view_menu.addAction("Настройки")
+
+        # справка
+        help_menu = menubar.addMenu("Справка")
+        help_menu.addAction("О программе")
 
     def create_toolbar(self):
-         # панель инструментов с кнопками
-        toolbar = tk.Frame(self, bd=1, relief=tk.RAISED, bg="#f0f0f0")
+        #создание панели инструментов
+        toolbar = QToolBar("Main Toolbar")
+        self.addToolBar(toolbar)
 
-        # кнопки действий
-        tk.Button(toolbar, text="➕ Добавить", command=self.open_add_window, bg="#e1e1e1").pack(side=tk.LEFT, padx=2,
-                                                                                               pady=5)
-        tk.Button(toolbar, text="🗑️ Удалить", command=self.delete_selected, bg="#e1e1e1").pack(side=tk.LEFT, padx=2,
-                                                                                               pady=5)
-        tk.Button(toolbar, text="📋 Копировать логин", command=self.copy_login, bg="#e1e1e1").pack(side=tk.LEFT, padx=2,
-                                                                                                  pady=5)
-        # поиск
-        tk.Label(toolbar, text="  🔍 Поиск:", bg="#f0f0f0").pack(side=tk.LEFT)
-        self.search_var = tk.StringVar()
-        self.search_var.trace("w", lambda name, index, mode: self.load_data())
-        self.search_entry = tk.Entry(toolbar, textvariable=self.search_var)
-        self.search_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-
-        toolbar.pack(side=tk.TOP, fill=tk.X)
+        add_action = QAction("Добавить", self)
+        add_action.triggered.connect(self.open_add_window)
+        toolbar.addAction(add_action)
 
     def create_table_area(self):
-        # Центральная таблица
-        self.table_container = tk.Frame(self)
-        self.table_container.pack(expand=True, fill=tk.BOTH)
-        self.table = SecureTable(self.table_container)
-        self.table.pack(expand=True, fill=tk.BOTH)
+        #Создание таблицы
+        self.table = SecureTable()
+        self.main_layout.addWidget(self.table)
+
+        #  данные для теста
+        self.table.add_record("Google", "user@gmail.com", "****", "Основная почта")
+        self.table.add_record("GitHub", "dev_daria", "****", "Рабочий аккаунт")
+
+    def copy_to_clipboard(self, password):
+        from PyQt6.QtWidgets import QApplication
+
+        #роверка,что пароль дошел до функции
+        if not password or password == "****":
+            print("Ошибка: Пароль пуст или замаскирован")
+            return
+
+        clipboard = QApplication.clipboard()
+        clipboard.setText(password)
+
+        self.statusBar().showMessage("Пароль скопирован в буфер!", 5000)
+
+        # Если есть таймер — запускаем
+        if hasattr(self, 'start_clipboard_timer'):
+            self.start_clipboard_timer(30)
 
     def create_status_bar(self):
-         #строка состояния
-        self.status_frame = tk.Frame(self, bd=1, relief=tk.SUNKEN)
-        self.status_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        self.status_bar = self.statusBar()
+        self.status_bar.showMessage("Система готова")
 
-        self.status_var = tk.StringVar(value="Система готова")
-        self.status_label = tk.Label(self.status_frame, textvariable=self.status_var, anchor=tk.W)
-        self.status_label.pack(side=tk.LEFT, padx=5)
+        self.timer_label = QLabel("")
+        self.status_bar.addPermanentWidget(self.timer_label)
 
-        self.timer_label = tk.Label(self.status_frame, text="Таймер: 0s", anchor=tk.E)
-        self.timer_label.pack(side=tk.RIGHT, padx=5)
+    def start_clipboard_timer(self, seconds=30):
+        #  обратный отсчет для очистки буфера
+        self.remaining_time = seconds
+        self.update_timer_label()
 
-    # Логика и функции (BINDING)
-    def check_first_run(self): #Проверка первого запуска
-        # проверка master_hash
+        # срабатывание каждую секунду для обновления текста
+        self.clipboard_timer.start(1000)
+
+    def update_timer_label(self):
+        if self.remaining_time > 0:
+            self.timer_label.setText(f"Буфер очистится через: {self.remaining_time}с  ")
+            self.remaining_time -= 1
+        else:
+            self.clear_clipboard()
+
+    def clear_clipboard(self):
+        # Очистка буфера и сброс интерфейса таймера
+        self.clipboard_timer.stop()
+        QApplication.clipboard().clear()
+        self.timer_label.setText("")
+        self.status_bar.showMessage("Буфер обмена очищен", 3000)
+
+    # Пример функции копирования, которая запускает этот процесс
+    def copy_password(self, password):
+        QApplication.clipboard().setText(password)
+        self.status_bar.showMessage("Пароль скопирован в буфер", 5000)
+        self.start_clipboard_timer(30)
+    def check_first_run(self):
+        # решает что показать пользователю при старте
+        master_hash = self.db_helper.get_setting("master_hash")
+
+        if not master_hash:
+            self.show_setup_wizard()
+        else:
+            self.show_login_dialog()
+
+    def show_setup_wizard(self):
+        from src.gui.setup_wizard import SetupWizard
+        self.wizard = SetupWizard(self)
+        #  сигнал завершения
+        self.wizard.setup_finished.connect(self.on_setup_complete)
+        self.wizard.show()
+
+    def _run_logic(self):
         if not self.db_helper.get_setting("master_hash"):
-            # Передаем метод on_setup_complete как callback
-            wizard = SetupWizard(self, callback=self.on_setup_complete)
-            self.wait_window(wizard)
+            self.show_setup_wizard()
+        else:
+            self.show_login_dialog()
 
-        # Повторная проверка после закрытия wizard
-        if not self.db_helper.get_setting("master_hash"):
-            messagebox.showerror("Ошибка", "Мастер-пароль не был сохранен!")
-            self.destroy()
-            return
+    def show_login_dialog(self):
+        from src.gui.login_window import LoginWindow
+        self.login_win = LoginWindow(self)
+        self.login_win.login_attempt.connect(self.verify_login)
 
-        self.deiconify()
-        self.show_login_window()
+        if not self.login_win.exec():
+            sys.exit()
+
+    def verify_login(self, password):
+        if self.db_helper.verify_master_password(password):
+            self.current_master_password = password
+
+            # закрытие окно логина
+            self.login_win.accept()
+
+            QTimer.singleShot(100, self.finalize_login)
+        else:
+            QMessageBox.critical(self, "Ошибка", "Неверный мастер-пароль!")
+            self.login_win.password_input.clear()
+
+    def finalize_login(self):
+        # метод для безопасного отображения интерфейса после логина
+        try:
+            self.load_data_from_db()
+            self.show()
+            self.statusBar().showMessage(f"Сессия активна. Добро пожаловать!")
+        except Exception as e:
+            print(f"Ошибка при загрузке данных: {e}")
 
     def on_setup_complete(self, password):
-        # метод который вызывается  для сохранения пароля
+        # вызывается после успешной регистрации
         self.db_helper.save_master_password(password)
-
-    def open_settings(self):
-        #открытие настроек
-        SettingsDialog(self)
-
-    def load_data(self):
-        # Загрузка с учетом фильтра поиска
-        query = self.search_var.get().lower()
-
-        for item in self.table.get_children():
-            self.table.delete(item)
-
-        entries = self.db_helper.get_all_entries()
-        count = 0
-        for entry in entries:
-            # Фильтрация
-            if query in entry['title'].lower() or query in entry['username'].lower():
-                self.table.insert("", "end", values=(entry['title'], entry['username'], "********"))
-                count += 1
-
-        self.status_var.set(f"Отображено записей: {count}")
-
-    def delete_selected(self):
-        #Удаление записи
-        selected_item = self.table.selection()
-        if not selected_item:
-            messagebox.showwarning("Внимание", "Выберите запись для удаления")
-            return
-
-        if messagebox.askyesno("Подтверждение", "Вы уверены, что хотите удалить эту запись?"):
-            values = self.table.item(selected_item)['values']
-            # Здесь будет вызов db_helper.delete_entry(values[0]) (для Спринта 2)
-            self.status_var.set(f"Удалено: {values[0]}")
-            self.table.delete(selected_item)
-
-    def copy_login(self):
-        #Копирование логина в буфер обмена
-        selected_item = self.table.selection()
-        if selected_item:
-            login = self.table.item(selected_item)['values'][1]
-            self.clipboard_clear()
-            self.clipboard_append(login)
-            self.status_var.set("Логин скопирован в буфер")
+        self.current_master_password = password
+        QMessageBox.information(self, "Успех", "Мастер-пароль установлен.")
+        self.show()
 
     def open_add_window(self):
-        #Открыть окно добавления
-        AddRecordWindow(self, self.handle_save)
+        try:
+            from src.gui.add_record_window import AddRecordWindow
+            self.add_win = AddRecordWindow(self)
+
+            # подключение сигнала к обработчику
+            self.add_win.record_saved.connect(self.handle_save)
+
+            # Используем exec() для модального окна (блокирует основное окно)
+            self.add_win.exec()
+
+        except Exception as e:
+            print(f"Критическая ошибка при открытии окна: {e}")
 
     def handle_save(self, service, login, password, notes):
-        # Шифрование и сохранение
-        km = KeyManager()
-        salt_str = self.db_helper.get_setting("master_salt")
+        try:
+            # 1сохранение в базу
+            self.db_helper.add_entry(service, login, password, notes)
 
-        if not salt_str:
-            salt = km.salt
-            self.db_helper.save_setting("master_salt", salt.hex())
-        else:
-            salt = bytes.fromhex(salt_str)
+            #2 обновление таблицы на экране
+            self.table.add_record(service, login, password, notes, self.copy_to_clipboard)
 
-        encryption_key = km.derive_key(self.current_master_password, salt)
-        crypto = AES256Placeholder()
-        encrypted_pass = crypto.encrypt(password.encode(), encryption_key)
+            #3обновление статуса
+            self.statusBar().showMessage(f"Запись {service} добавлена", 5000)
 
-        self.db_helper.add_entry(service, login, encrypted_pass.decode('latin-1'), notes=notes)
-        self.load_data()
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка БД", f"Не удалось сохранить: {e}")
+
+    def load_data_from_db(self):
+        try:
+            # очистка таблицы перед загрузкой
+            self.table.setRowCount(0)
+
+            records = self.db_helper.get_all_entries()
+
+            if not records:
+                self.statusBar().showMessage("База данных пуста", 5000)
+                return
+
+            for rec in records:
+                service_name = rec.get('service', 'Unknown')
+                username = rec.get('username', '')
+                password = rec.get('encrypted_password', '')
+                notes = rec.get('notes', '')
+
+                # Добавляем в таблицу, передавая callback для копирования
+                self.table.add_record(
+                    service_name,
+                    username,
+                    password,
+                    notes,
+                    self.copy_to_clipboard
+                )
+
+            self.statusBar().showMessage(f"Загружено записей: {len(records)}", 5000)
+
+        except Exception as e:
+            print(f"Критическая ошибка при загрузке данных: {e}")
+            self.statusBar().showMessage("Ошибка загрузки данных из БД")
+
