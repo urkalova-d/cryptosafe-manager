@@ -1,10 +1,8 @@
-# src/database/db.py
 import sqlite3
 from threading import Lock
 from tkinter import messagebox
 from src.core.events import event_bus, EventType
 from src.core.key_manager import KeyManager
-
 
 class DatabaseHelper:
     def __init__(self, db_path="vault.db"):
@@ -21,7 +19,7 @@ class DatabaseHelper:
         with self._lock:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                # Основная таблица записей
+                # основная таблица записей
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS vault_entries (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,7 +30,7 @@ class DatabaseHelper:
                         notes TEXT
                     )
                 """)
-                # Таблица настроек (обязательно!)
+                # таблица настроек
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS settings (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,7 +38,7 @@ class DatabaseHelper:
                         setting_value TEXT NOT NULL
                     )
                 """)
-                # Таблица логов (нужна для тестов модулей)
+                # таблица логов(для тестов модулей)
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS audit_log (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,10 +49,7 @@ class DatabaseHelper:
                 conn.commit()
 
     def close(self):
-        """Закрываем все соединения (нужно для тестов в Windows)"""
-        # В твоей реализации get_connection каждый раз создает новое,
-        # поэтому здесь просто ставим заглушку, чтобы тесты не падали,
-        # либо закрываем текущее, если ты его хранишь.
+        # закрытие все соединения (нужно для тестов в windows)
         pass
 
     def add_entry(self, title, username, encrypted_password, url="", notes=""):
@@ -93,12 +88,11 @@ class DatabaseHelper:
                 result = cursor.fetchone()
                 return result[0] if result else None
 
-    # --- НОВЫЕ МЕТОДЫ ДЛЯ БЕЗОПАСНОСТИ ---
 
     def save_master_password(self, password):
-        """Хеширует пароль и сохраняет соль и хеш в БД"""
+        # хеширует пароль и сохраняет соль и хеш в бд
         km = KeyManager()
-        # Генерируем ключ (соль создается автоматически внутри km)
+        # генерация ключа(соль создается автоматически внутри km)
         derived_key = km.derive_key(password)
 
         self.save_setting("master_salt", km.salt.hex())
@@ -106,7 +100,7 @@ class DatabaseHelper:
         event_bus.publish(EventType.SETTINGS_CHANGED, "Master password set")
 
     def verify_master_password(self, password):
-        """Проверяет введенный пароль"""
+        #проверка введеного пароля
         salt_str = self.get_setting("master_salt")
         stored_hash_str = self.get_setting("master_hash")
 
@@ -115,17 +109,13 @@ class DatabaseHelper:
 
         km = KeyManager()
         salt = bytes.fromhex(salt_str)
-        # Генерируем ключ из введенного пароля с той же солью
+        # генерирование ключа с той же солью
         derived_key = km.derive_key(password, salt)
 
         return derived_key.hex() == stored_hash_str
 
-        # В src/database/db.py внутри класса DatabaseHelper
     def close(self):
-        """Закрываем соединение для тестов"""
-        # Так как get_connection создает новые объекты,
-        # здесь можно ничего не делать, если вы не храните self.conn.
-        # Но если храните, то:
+        # Закрываем соединение для тестов
         if hasattr(self, 'conn') and self.conn:
                 self.conn.close()
 db_manager = DatabaseHelper(db_path="vault.db")
