@@ -4,3 +4,5 @@ __pycache__/
 *.pyc
 vault.db*.db
 __pycache__/
+*.db
+__pycache__/
