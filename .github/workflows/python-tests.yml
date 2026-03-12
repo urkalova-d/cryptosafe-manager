@@ -24,8 +24,9 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pytest pytest-qt pytest-cov PyQt6
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        # Устанавливаем принудительно конкретные версии
+        pip install PyQt6==6.6.1 PyQt6-Qt6==6.6.1 PyQt6-sip==13.6.0
+        pip install pytest pytest-qt pytest-cov cryptography pycryptodome argon2-cffi pyperclip python-dotenv
 
     - name: Install Qt dependencies (Linux)
       run: |
@@ -49,5 +50,7 @@ jobs:
 
     - name: Run tests with xvfb
       run: |
-        export QT_DEBUG_PLUGINS=1
+        # Помогаем системе найти библиотеки внутри site-packages
+        export LD_LIBRARY_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/PyQt6/Qt6/lib:$LD_LIBRARY_PATH
+        export QT_QPA_PLATFORM=xcb
         xvfb-run --auto-servernum pytest

@@ -5,6 +5,8 @@ argon2-cffi==23.1.0
 
 # GUI фреймворк
 PyQt6==6.6.1
+PyQt6-Qt6==6.6.1
+PyQt6-sip==13.6.0
 
 # Утилиты
 pyperclip==1.8.2
