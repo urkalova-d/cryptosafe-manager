@@ -1,4 +1,4 @@
-# tests/conftest.py (файл настроек pytest)
+
 import pytest
 import os
 from src.database.db import DatabaseHelper
@@ -7,6 +7,7 @@ from src.database.db import DatabaseHelper
 @pytest.fixture
 def db_helper():
     test_db = "test_vault.db"
+    # очистка перед тестом
     if os.path.exists(test_db):
         try:
             os.remove(test_db)
@@ -16,11 +17,13 @@ def db_helper():
     db = DatabaseHelper(test_db)
     yield db
 
-    # Закрываем соединение внутри объекта, если оно там есть
-    db.close()
+    #безопасное закрытие
+    if hasattr(db, 'close'):
+        db.close()
 
+    # Небольшая пауза, чтобы Windows успела "отпустить" файл
     import time
-    time.sleep(0.1)  # Пауза для Windows
+    time.sleep(0.1)
 
     if os.path.exists(test_db):
         try:

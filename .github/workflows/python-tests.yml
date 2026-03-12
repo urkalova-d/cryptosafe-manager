@@ -1,4 +1,4 @@
-name: Python Tests
+name: Python application
 
 on:
   push:
@@ -6,30 +6,33 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
 
     - name: Set up Python 3.12
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v3
       with:
         python-version: "3.12"
 
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y tk-dev xvfb  
-
-    - name: Install Python dependencies
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
+        pip install pytest pytest-qt pytest-cov PyQt6
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-        pip install pytest pytest-cov
+
+    - name: Install Qt dependencies (Linux)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xinput0 libxcb-shape0 xvfb
 
     - name: Run tests with xvfb
       run: |
-        
-        xvfb-run python -m pytest
+        # Запускаем pytest через xvfb-run, чтобы GUI тесты не падали
+        xvfb-run --auto-servernum pytest
