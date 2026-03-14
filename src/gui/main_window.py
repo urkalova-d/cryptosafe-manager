@@ -8,10 +8,28 @@ from src.gui.widgets.secure_table import SecureTable
 from PyQt6.QtCore import Qt, QTimer
 
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox,
-                             QTableWidget, QTableWidgetItem, QHeaderView,
+                             QTableWidget,QApplication, QTableWidgetItem, QHeaderView,
                              QMenuBar, QMenu, QStatusBar, QToolBar, QLabel)
 
+from PyQt6.QtCore import QObject, pyqtSignal, QThread
 
+class LoadDataWorker(QObject):
+    # Сигнал передает список расшифрованных записей
+    finished = pyqtSignal(list)
+    # Сигнал для передачи ошибок, если что-то пойдет не так
+    error = pyqtSignal(str)
+
+    def __init__(self, db_manager):
+        super().__init__()
+        self.db = db_manager
+
+    def run(self):
+        try:
+            # Имитируем тяжелую работу или просто выполняем дешифровку
+            records = self.db.get_all_entries()
+            self.finished.emit(records)
+        except Exception as e:
+            self.error.emit(str(e))
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -32,6 +50,8 @@ class MainWindow(QMainWindow):
         self.init_ui()
 
         QTimer.singleShot(100, self.check_first_run)
+
+        self.loading_thread = None
     def init_ui(self):  #Инициализация всех графических компонентов
 
         #центральный виджет
@@ -45,6 +65,8 @@ class MainWindow(QMainWindow):
         self.create_table_area()
         self.create_status_bar()
         self.start_clipboard_timer(30)
+
+
 
     def create_app_menu(self):
 
@@ -90,8 +112,8 @@ class MainWindow(QMainWindow):
         self.main_layout.addWidget(self.table)
 
         #  данные для теста
-        self.table.add_record("Google", "user@gmail.com", "****", "Основная почта")
-        self.table.add_record("GitHub", "dev_daria", "****", "Рабочий аккаунт")
+        #self.table.add_record("Google", "user@gmail.com", "****", "Основная почта")
+        #self.table.add_record("GitHub", "dev_daria", "****", "Рабочий аккаунт")
 
     def copy_to_clipboard(self, password):
         from PyQt6.QtWidgets import QApplication
@@ -144,14 +166,26 @@ class MainWindow(QMainWindow):
         QApplication.clipboard().setText(password)
         self.status_bar.showMessage("Пароль скопирован в буфер", 5000)
         self.start_clipboard_timer(30)
-    def check_first_run(self):
-        # решает что показать пользователю при старте
-        master_hash = self.db_helper.get_setting("master_hash")
 
-        if not master_hash:
-            self.show_setup_wizard()
-        else:
-            self.show_login_dialog()
+    # src/gui/main_window.py
+
+    def check_first_run(self):
+        try:
+            if not self.db_helper:
+                self.show()
+                return
+
+            # Проверка наличия мастер-пароля
+            master_hash = self.db_helper.get_setting("master_hash")
+
+            if master_hash is None:
+                self.show_setup_wizard()
+            else:
+                self.show_login_dialog()
+
+        except Exception as e:
+            print(f"Ошибка при проверке первого запуска: {e}")
+            self.show()
 
     def show_setup_wizard(self):
         from src.gui.setup_wizard import SetupWizard
@@ -261,4 +295,50 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"Критическая ошибка при загрузке данных: {e}")
             self.statusBar().showMessage("Ошибка загрузки данных из БД")
+
+    def load_data(self):
+        #Запуск процесса загрузки в фоновом потоке
+        self.statusBar().showMessage("Загрузка данных...")
+
+        # создание поток
+        self.loading_thread = QThread()
+        self.worker = LoadDataWorker(self.db)
+        self.worker.moveToThread(self.loading_thread)
+
+        # соединяем сигналы
+        self.loading_thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self.on_load_finished)
+        self.worker.error.connect(lambda e: print(f"Worker Error: {e}"))
+
+        # очистка памяти после завершения
+        self.worker.finished.connect(self.loading_thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.loading_thread.finished.connect(self.loading_thread.deleteLater)
+
+        self.loading_thread.start()
+
+    def on_load_finished(self, records):
+        self.table.setRowCount(0)
+        for row in records:
+            try:
+                if isinstance(row, dict):
+                    service = row.get('service', '')
+                    login = row.get('username', row.get('login', ''))
+                    password = row.get('encrypted_password', row.get('password', ''))
+                    notes = row.get('notes', '')
+                else:
+                    service = row[1]
+                    login = row[2]
+                    password = row[3]
+                    notes = row[4] if len(row) > 4 else ""
+
+                self.table.add_record(service, login, password, notes, self.copy_to_clipboard)
+
+            except Exception as e:
+                print(f"Ошибка при чтении строки: {e}")
+
+        self.statusBar().showMessage(f"Загружено записей: {len(records)}", 5000)
+
+    def on_load_error(self, error_message):
+        self.statusBar().showMessage(f"Ошибка: {error_message}")
 
