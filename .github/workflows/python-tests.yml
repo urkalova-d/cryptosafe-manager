@@ -47,7 +47,7 @@ jobs:
           libx11-xcb1 \
           libxcb-util1 \
           xvfb \
-          libasound2 # Добавил, часто требуется для Qt мультимедиа
+          libasound2t64
 
     - name: Run tests with xvfb
       env:
