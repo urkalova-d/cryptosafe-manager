@@ -18,7 +18,7 @@ class DatabaseHelper:
     def init_db(self):
         with self._lock:
             cursor = self.conn.cursor()
-            # Таблица для записей
+            # таблица для записей
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS vault_entries (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,17 +28,26 @@ class DatabaseHelper:
                     notes TEXT
                 )
             """)
-            # Таблица для настроек (мастер-пароль, соль и т.д.)
+            # таблица для настроек мастер пароля, соли и тд
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS settings (
                     setting_key TEXT PRIMARY KEY,
                     setting_value TEXT NOT NULL
                 )
             """)
+            self.conn.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES (?, ?)",
+                              ("kdf_type", "argon2id"))
             self.conn.commit()
 
+    def migrate_to_v2(self):
+        #Простая система миграции
+        # Проверка есть ли уже соль в настройках
+        if not self.get_setting("kdf_salt"):
+            print("Запуск миграции БД на новую систему ключей...")
+
+
     def save_setting(self, key, value):
-        """Сохраняет или обновляет настройку в базе"""
+        #сохранение или обновление настройки в базе
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute("""
@@ -48,7 +57,7 @@ class DatabaseHelper:
             self.conn.commit()
 
     def get_setting(self, key):
-        """Получает значение настройки по ключу"""
+        #получение значения настройки по ключу
         with self._lock:
             try:
                 cursor = self.conn.cursor()
@@ -60,28 +69,46 @@ class DatabaseHelper:
                 return None
 
     def save_master_password(self, password):
-        """Хеширует пароль с солью и сохраняет в настройки"""
-        salt = os.urandom(16).hex()
-        payload = (password + salt).encode('utf-8')
-        password_hash = hashlib.sha256(payload).hexdigest()
+        #хеширует пароль через argon2 и сохраняет в настройки
+        from src.core.crypto.key_derivation import KeyDerivationService
+        import secrets
 
-        self.save_setting("master_hash", password_hash)
-        self.save_setting("master_salt", salt)
+        # генерация соли
+        salt = secrets.token_bytes(16)
+
+        #вывод ключа
+        kdf = KeyDerivationService()
+        derived_key = kdf.derive_key_argon2(password, salt)
+
+        #  сохранение хеша от ключа для проверки входа
+        import hashlib
+        master_hash = hashlib.sha256(derived_key).hexdigest()
+
+        # сохраниение в базу
+        self.save_setting("master_hash", master_hash)
+        self.save_setting("kdf_salt", salt.hex())  # Именно kdf_salt!
+        self.save_setting("kdf_type", "argon2id")
 
     def verify_master_password(self, password):
-        """Проверяет введенный пароль против сохраненного хеша"""
-        stored_hash = self.get_setting("master_hash")
-        salt = self.get_setting("master_salt")
+        #проверка мастер пароля
+        from src.core.crypto.key_derivation import KeyDerivationService
+        import hashlib
 
-        if not stored_hash or not salt:
+        stored_hash = self.get_setting("master_hash")
+        salt_hex = self.get_setting("kdf_salt")
+
+        if not stored_hash or not salt_hex:
             return False
 
-        payload = (password + salt).encode('utf-8')
-        input_hash = hashlib.sha256(payload).hexdigest()
+        salt = bytes.fromhex(salt_hex)
+        kdf = KeyDerivationService()
+        derived_key = kdf.derive_key_argon2(password, salt)
+
+        input_hash = hashlib.sha256(derived_key).hexdigest()
         return input_hash == stored_hash
 
     def add_entry(self, service, username, encrypted_password, notes=""):
-        """Добавляет новую запись в сейф"""
+        #добавление новой записи
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute("""
@@ -92,14 +119,14 @@ class DatabaseHelper:
             return cursor.lastrowid
 
     def get_all_entries(self):
-        """Возвращает все записи в виде списка словарей"""
+        #Возвращает все записи в виде списка
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute("SELECT * FROM vault_entries")
             return [dict(row) for row in cursor.fetchall()]
 
     def close(self):
-        """Закрывает соединение с базой"""
+        #Закрывает соединение с базой
         if hasattr(self, 'conn') and self.conn:
             self.conn.close()
 

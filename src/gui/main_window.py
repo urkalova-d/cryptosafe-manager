@@ -13,6 +13,11 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox,
 
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
 
+from src.core.crypto.key_manager import KeyManager
+from src.core.crypto.authentication import AuthenticationService
+from src.core.crypto.encryption_service import EncryptionService
+from PyQt6.QtCore import QEvent
+
 class LoadDataWorker(QObject):
     # Сигнал передает список расшифрованных записей
     finished = pyqtSignal(list)
@@ -25,7 +30,6 @@ class LoadDataWorker(QObject):
 
     def run(self):
         try:
-            # Имитируем тяжелую работу или просто выполняем дешифровку
             records = self.db.get_all_entries()
             self.finished.emit(records)
         except Exception as e:
@@ -52,6 +56,19 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(100, self.check_first_run)
 
         self.loading_thread = None
+        #инициализация криптостека
+        self.key_manager = KeyManager(self.db_helper)
+        self.auth_service = AuthenticationService(self.key_manager, timeout_seconds=60)# завершение сессии через минуту
+        self.encryption_service = EncryptionService(self.key_manager)
+
+
+        self.session_timer = QTimer(self)
+        self.session_timer.timeout.connect(self.check_user_session)
+        self.session_timer.start(5000)  # проверка каждые 5 секунд
+        # установка фильтр на все приложение
+        QApplication.instance().installEventFilter(self)
+
+
     def init_ui(self):  #Инициализация всех графических компонентов
 
         #центральный виджет
@@ -66,7 +83,14 @@ class MainWindow(QMainWindow):
         self.create_status_bar()
         self.start_clipboard_timer(30)
 
+    def eventFilter(self, obj, event):
+        # обработка только кликов мыши и нажатия клавиш
+        if event.type() in [QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress]:
+            if hasattr(self, 'auth_service'):
+                self.auth_service._update_activity()
+                # print("Активность зафиксирована")
 
+        return super().eventFilter(obj, event)
 
     def create_app_menu(self):
 
@@ -128,7 +152,7 @@ class MainWindow(QMainWindow):
 
         self.statusBar().showMessage("Пароль скопирован в буфер!", 5000)
 
-        # Если есть таймер — запускаем
+        # если есть таймер то запуск
         if hasattr(self, 'start_clipboard_timer'):
             self.start_clipboard_timer(30)
 
@@ -155,19 +179,17 @@ class MainWindow(QMainWindow):
             self.clear_clipboard()
 
     def clear_clipboard(self):
-        # Очистка буфера и сброс интерфейса таймера
+        # очистка буфера и сброс интерфейса таймера
         self.clipboard_timer.stop()
         QApplication.clipboard().clear()
         self.timer_label.setText("")
         self.status_bar.showMessage("Буфер обмена очищен", 3000)
 
-    # Пример функции копирования, которая запускает этот процесс
-    def copy_password(self, password):
+
+    def copy_password(self, password):#функция копирования запускающая процесс
         QApplication.clipboard().setText(password)
         self.status_bar.showMessage("Пароль скопирован в буфер", 5000)
         self.start_clipboard_timer(30)
-
-    # src/gui/main_window.py
 
     def check_first_run(self):
         try:
@@ -175,7 +197,7 @@ class MainWindow(QMainWindow):
                 self.show()
                 return
 
-            # Проверка наличия мастер-пароля
+            # проверка на наличия мастер-пароля
             master_hash = self.db_helper.get_setting("master_hash")
 
             if master_hash is None:
@@ -209,7 +231,8 @@ class MainWindow(QMainWindow):
             sys.exit()
 
     def verify_login(self, password):
-        if self.db_helper.verify_master_password(password):
+        # активация таймера сессии
+        if self.auth_service.login(password):
             self.current_master_password = password
 
             # закрытие окно логина
@@ -341,4 +364,10 @@ class MainWindow(QMainWindow):
 
     def on_load_error(self, error_message):
         self.statusBar().showMessage(f"Ошибка: {error_message}")
+
+    def check_user_session(self):
+        # проверка для блокировки
+        if not self.auth_service.check_session():
+            QMessageBox.warning(self, "Сессия истекла", "Ваша сессия завершена. Приложение будет закрыто.")
+            self.close()  # Или можно вызвать self.show_login_dialog()
 
