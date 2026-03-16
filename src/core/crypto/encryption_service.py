@@ -5,7 +5,6 @@ from cryptography.fernet import Fernet
 
 class EncryptionService:
     def __init__(self, key_manager):
-        #Принимает экземпляр KeyManager для доступа к производному ключу.
         self.key_manager = key_manager
 
     def _get_fernet(self):

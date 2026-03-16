@@ -58,7 +58,7 @@ class MainWindow(QMainWindow):
         self.loading_thread = None
         #инициализация криптостека
         self.key_manager = KeyManager(self.db_helper)
-        self.auth_service = AuthenticationService(self.key_manager, timeout_seconds=60)# завершение сессии через минуту
+        self.auth_service = AuthenticationService(self.key_manager,self.db_helper, timeout_seconds=60)# завершение сессии через минуту
         self.encryption_service = EncryptionService(self.key_manager)
 
 
@@ -87,8 +87,8 @@ class MainWindow(QMainWindow):
         # обработка только кликов мыши и нажатия клавиш
         if event.type() in [QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress]:
             if hasattr(self, 'auth_service'):
-                self.auth_service._update_activity()
-                # print("Активность зафиксирована")
+                self.auth_service.update_activity()
+                # print("активность зафиксирована")
 
         return super().eventFilter(obj, event)
 
@@ -192,29 +192,23 @@ class MainWindow(QMainWindow):
         self.start_clipboard_timer(30)
 
     def check_first_run(self):
-        try:
-            if not self.db_helper:
-                self.show()
-                return
+        #проверка хеша мастер пароля в базе
+        master_hash = self.db_helper.get_setting("master_hash")
 
-            # проверка на наличия мастер-пароля
-            master_hash = self.db_helper.get_setting("master_hash")
-
-            if master_hash is None:
-                self.show_setup_wizard()
-            else:
-                self.show_login_dialog()
-
-        except Exception as e:
-            print(f"Ошибка при проверке первого запуска: {e}")
-            self.show()
+        if not master_hash:
+            # если хеша нет запуск регистрации
+            QTimer.singleShot(100, self.show_setup_wizard)
+        else:
+            # если хеш есть показываем вход
+            QTimer.singleShot(100, self.show_login_dialog)
 
     def show_setup_wizard(self):
         from src.gui.setup_wizard import SetupWizard
-        self.wizard = SetupWizard(self)
-        #  сигнал завершения
-        self.wizard.setup_finished.connect(self.on_setup_complete)
-        self.wizard.show()
+        wizard = SetupWizard(self)
+        wizard.setup_finished.connect(self.on_setup_complete)
+
+        if not wizard.exec():
+            sys.exit()  # закрытие через крестик
 
     def _run_logic(self):
         if not self.db_helper.get_setting("master_hash"):
@@ -231,12 +225,16 @@ class MainWindow(QMainWindow):
             sys.exit()
 
     def verify_login(self, password):
-        # активация таймера сессии
+        # вход через сервис аутентификации
         if self.auth_service.login(password):
             self.current_master_password = password
 
-            # закрытие окно логина
             self.login_win.accept()
+
+            # таймер проверки сессии после входа
+            if hasattr(self, 'session_timer'):
+                self.session_timer.start(5000)  # проверка каждые 5 секудн
+
 
             QTimer.singleShot(100, self.finalize_login)
         else:
@@ -253,11 +251,23 @@ class MainWindow(QMainWindow):
             print(f"Ошибка при загрузке данных: {e}")
 
     def on_setup_complete(self, password):
-        # вызывается после успешной регистрации
-        self.db_helper.save_master_password(password)
-        self.current_master_password = password
-        QMessageBox.information(self, "Успех", "Мастер-пароль установлен.")
-        self.show()
+        try:
+            self.db_helper.save_master_password(password)
+            self.current_master_password = password
+
+            # активация сессии
+            if self.auth_service.login(password):
+                self.load_data_from_db()
+                self.show()
+
+                # запуск таймера проверки сессии
+                if hasattr(self, 'session_timer'):
+                    self.session_timer.start(5000)  # Проверка каждые 5 секунд
+
+                QMessageBox.information(self, "Успех", "Сессия активирована!")
+        except Exception as e:
+            print(f"Ошибка при завершении настройки: {e}")
+
 
     def open_add_window(self):
         try:
@@ -368,6 +378,10 @@ class MainWindow(QMainWindow):
     def check_user_session(self):
         # проверка для блокировки
         if not self.auth_service.check_session():
-            QMessageBox.warning(self, "Сессия истекла", "Ваша сессия завершена. Приложение будет закрыто.")
-            self.close()  # Или можно вызвать self.show_login_dialog()
+            if hasattr(self, 'session_timer'):
+                self.session_timer.stop()
+
+            QMessageBox.warning(self, "Сессия истекла", "Время ожидания вышло. Приложение будет закрыто.")
+            self.close()
+            QApplication.quit()
 

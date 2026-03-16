@@ -10,6 +10,10 @@ class KeyManager:
         self.storage = KeyStorage()
         self.kdf = KeyDerivationService()
 
+    def verify_password(self, password: str, stored_hash: str) -> bool:
+        # проверка пароля через argon2
+        return self.kdf.verify_password(password, stored_hash)
+
     def verify_and_unlock(self, password: str) -> bool:#проверка пароля и инициализация ключа в памяти
         # Получение соли и хеша из бд
         salt_hex = self.db.get_setting("kdf_salt")

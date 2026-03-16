@@ -2,18 +2,25 @@ import time
 
 
 class AuthenticationService:
-    def __init__(self, key_manager, timeout_seconds=300):
+    def __init__(self, key_manager, db_manager, timeout_seconds=60):
         self.key_manager = key_manager
+        self.db_manager = db_manager
         self.timeout_seconds = timeout_seconds
         self._is_authenticated = False
         self._last_activity = 0
 
     def login(self, password: str) -> bool:
-        #попытка входа и начало сессии
-        if self.key_manager.verify_and_unlock(password):
+        # Получение сохраненного хеша из базы
+        stored_hash = self.db_manager.get_setting("master_hash")
+
+        if not stored_hash:
+            return False
+
+        if self.key_manager.verify_password(password, stored_hash):
             self._is_authenticated = True
-            self._last_activity = time.time()  #фиксирование времени входа
+            self.update_activity()
             return True
+
         return False
 
     def logout(self):
@@ -22,7 +29,7 @@ class AuthenticationService:
         self.key_manager.storage.clear()
         print("Сессия завершена, ключи удалены.")
 
-    def _update_activity(self):
+    def update_activity(self):
         # обновление времени от последнего действия
         self._last_activity = time.time()
 

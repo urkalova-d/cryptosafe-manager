@@ -71,23 +71,13 @@ class DatabaseHelper:
     def save_master_password(self, password):
         #хеширует пароль через argon2 и сохраняет в настройки
         from src.core.crypto.key_derivation import KeyDerivationService
-        import secrets
 
-        # генерация соли
-        salt = secrets.token_bytes(16)
-
-        #вывод ключа
         kdf = KeyDerivationService()
-        derived_key = kdf.derive_key_argon2(password, salt)
 
-        #  сохранение хеша от ключа для проверки входа
-        import hashlib
-        master_hash = hashlib.sha256(derived_key).hexdigest()
+        master_hash = kdf.create_auth_hash(password)
 
-        # сохраниение в базу
+        # сохранение хеш строки
         self.save_setting("master_hash", master_hash)
-        self.save_setting("kdf_salt", salt.hex())  # Именно kdf_salt!
-        self.save_setting("kdf_type", "argon2id")
 
     def verify_master_password(self, password):
         #проверка мастер пароля
