@@ -2,13 +2,14 @@ import sqlite3
 import hashlib
 import os
 from threading import Lock
+import json
 
 class DatabaseHelper:
     def __init__(self, db_path="vault.db"):
         self.db_path = db_path
         self._lock = Lock()
         # Создаем постоянное соединение для всего жизненного цикла объекта
-        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False , timeout=20)
         self.conn.row_factory = sqlite3.Row
         self.init_db()
 
@@ -35,9 +36,41 @@ class DatabaseHelper:
                     setting_value TEXT NOT NULL
                 )
             """)
+            cursor.execute("""
+                            CREATE TABLE IF NOT EXISTS key_store (
+                                key_id TEXT PRIMARY KEY,
+                                salt TEXT NOT NULL,
+                                params TEXT NOT NULL,
+                                version INTEGER DEFAULT 1
+                            )
+                        """)
             self.conn.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES (?, ?)",
                               ("kdf_type", "argon2id"))
             self.conn.commit()
+
+    def save_key_store(self, key_id: str, salt: bytes, params: dict, version: int = 1):
+        """Сохранение параметров генерации ключей"""
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO key_store (key_id, salt, params, version)
+                VALUES (?, ?, ?, ?)
+            """, (key_id, salt.hex(), json.dumps(params), version))
+            self.conn.commit()
+
+    def get_key_store(self, key_id: str):
+        """Получение параметров генерации ключей"""
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT salt, params, version FROM key_store WHERE key_id = ?", (key_id,))
+            result = cursor.fetchone()
+            if result:
+                return {
+                    'salt': bytes.fromhex(result['salt']),
+                    'params': json.loads(result['params']),
+                    'version': result['version']
+                }
+            return None
 
     def migrate_to_v2(self):
         #Простая система миграции
@@ -70,15 +103,15 @@ class DatabaseHelper:
 
     def save_master_password(self, password):
         #хеширует пароль через argon2 и сохраняет в настройки
-        from src.core.crypto.key_derivation import KeyDerivationService
+        #from src.core.crypto.key_derivation import KeyDerivationService
 
-        kdf = KeyDerivationService()
+        #kdf = KeyDerivationService()
 
-        master_hash = kdf.create_auth_hash(password)
+        #master_hash = kdf.create_auth_hash(password)
 
         # сохранение хеш строки
-        self.save_setting("master_hash", master_hash)
-
+        #self.save_setting("master_hash", master_hash)
+        pass
     def verify_master_password(self, password):
         #проверка мастер пароля
         from src.core.crypto.key_derivation import KeyDerivationService

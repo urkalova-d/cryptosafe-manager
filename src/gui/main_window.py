@@ -69,6 +69,7 @@ class MainWindow(QMainWindow):
         QApplication.instance().installEventFilter(self)
 
 
+
     def init_ui(self):  #Инициализация всех графических компонентов
 
         #центральный виджет
@@ -208,6 +209,7 @@ class MainWindow(QMainWindow):
         wizard.setup_finished.connect(self.on_setup_complete)
 
         if not wizard.exec():
+            self.close()
             sys.exit()  # закрытие через крестик
 
     def _run_logic(self):
@@ -225,17 +227,13 @@ class MainWindow(QMainWindow):
             sys.exit()
 
     def verify_login(self, password):
-        # вход через сервис аутентификации
+        # auth_service.login должен вызывать key_manager.verify_and_unlock
         if self.auth_service.login(password):
             self.current_master_password = password
-
             self.login_win.accept()
 
-            # таймер проверки сессии после входа
             if hasattr(self, 'session_timer'):
-                self.session_timer.start(5000)  # проверка каждые 5 секудн
-
-
+                self.session_timer.start(5000)
             QTimer.singleShot(100, self.finalize_login)
         else:
             QMessageBox.critical(self, "Ошибка", "Неверный мастер-пароль!")
@@ -252,22 +250,23 @@ class MainWindow(QMainWindow):
 
     def on_setup_complete(self, password):
         try:
-            self.db_helper.save_master_password(password)
+            # Инициализация ключей и сохранение параметров в БД
+            self.key_manager.setup_new_user(password)
+
             self.current_master_password = password
 
-            # активация сессии
-            if self.auth_service.login(password):
+            # Активация сессии (автоматический вход после регистрации)
+            if self.auth_service.login(password):  # login внутри себя вызовет verify_and_unlock
                 self.load_data_from_db()
                 self.show()
 
-                # запуск таймера проверки сессии
                 if hasattr(self, 'session_timer'):
-                    self.session_timer.start(5000)  # Проверка каждые 5 секунд
+                    self.session_timer.start(5000)
 
-                QMessageBox.information(self, "Успех", "Сессия активирована!")
+                QMessageBox.information(self, "Успех", "Мастер-пароль установлен и сессия активна!")
         except Exception as e:
             print(f"Ошибка при завершении настройки: {e}")
-
+            QMessageBox.critical(self, "Ошибка", f"Не удалось завершить настройку: {e}")
 
     def open_add_window(self):
         try:

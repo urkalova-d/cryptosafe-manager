@@ -16,10 +16,12 @@ class AuthenticationService:
         if not stored_hash:
             return False
 
-        if self.key_manager.verify_password(password, stored_hash):
-            self._is_authenticated = True
-            self.update_activity()
-            return True
+        if self.key_manager.kdf.verify_password(password, stored_hash):
+            # Если хеш верен, генерируем и разблокируем ключи в памяти
+            if self.key_manager.verify_and_unlock(password):
+                self._is_authenticated = True
+                self.update_activity()
+                return True
 
         return False
 
