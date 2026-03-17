@@ -5,7 +5,7 @@ from src.database.db import DatabaseHelper
 from src.gui.setup_wizard import SetupWizard
 from src.gui.add_record_window import AddRecordWindow
 from src.gui.widgets.secure_table import SecureTable
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QEvent
 
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox,
                              QTableWidget,QApplication, QTableWidgetItem, QHeaderView,
@@ -58,7 +58,7 @@ class MainWindow(QMainWindow):
         self.loading_thread = None
         #инициализация криптостека
         self.key_manager = KeyManager(self.db_helper)
-        self.auth_service = AuthenticationService(self.key_manager,self.db_helper, timeout_seconds=60)# завершение сессии через минуту
+        self.auth_service = AuthenticationService(self.key_manager,self.db_helper, timeout_seconds=3600)# завершение сессии через час
         self.encryption_service = EncryptionService(self.key_manager)
 
 
@@ -85,13 +85,31 @@ class MainWindow(QMainWindow):
         self.start_clipboard_timer(30)
 
     def eventFilter(self, obj, event):
-        # обработка только кликов мыши и нажатия клавиш
         if event.type() in [QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress]:
             if hasattr(self, 'auth_service'):
                 self.auth_service.update_activity()
-                # print("активность зафиксирована")
 
+        # ВАЖНО: Обязательно верните результат родительского метода
         return super().eventFilter(obj, event)
+
+    def closeEvent(self, event):
+        # Point 4: Application closes
+        print("Закрытие приложения -> Очистка памяти")
+        self.auth_service.logout()
+        super().closeEvent(event)
+
+    def check_user_session(self):
+        # Проверка сессии
+        if self.auth_service.is_authenticated():
+            # Сессия активна
+            pass
+        else:
+            # Сессия истекла или была заблокирована
+            if self.auth_service._is_authenticated is False:
+                # Если logout уже произошел внутри auth_service
+                QMessageBox.warning(self, "Сессия истекла", "Время ожидания вышло или окно было свернуто.")
+                self.close()
+                QApplication.quit()
 
     def create_app_menu(self):
 

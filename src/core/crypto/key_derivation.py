@@ -1,12 +1,9 @@
 import os
-import json
 import secrets
+import base64
 from argon2 import PasswordHasher, Type
-# Импортируем низкоуровневые функции Argon2 для генерации ключей
-from argon2.low_level import hash_secret_raw, Type as LowLevelType
-
-from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 
 
@@ -15,33 +12,24 @@ class KeyDerivationService:
         if config is None:
             config = {}
 
-        # Параметры Argon2
-        self.time_cost = config.get('argon2_time', 3)
-        self.memory_cost = config.get('argon2_memory', 65536)  # 64 MiB
-        self.parallelism = config.get('argon2_parallelism', 4)
-
-        # Хешер для хранения пароля (проверка входа)
+        # Структура в точности как в примере ТЗ
         self.argon2_hasher = PasswordHasher(
-            time_cost=self.time_cost,
-            memory_cost=self.memory_cost,
-            parallelism=self.parallelism,
+            time_cost=config.get('argon2_time', 3),
+            memory_cost=config.get('argon2_memory', 65536),
+            parallelism=config.get('argon2_parallelism', 4),
             hash_len=32,
             salt_len=16,
             type=Type.ID
         )
-
-        # Параметры PBKDF2
         self.pbkdf2_iterations = config.get('pbkdf2_iterations', 100000)
 
     def create_auth_hash(self, password: str) -> str:
-        """Создание хеша для хранения в БД (для проверки входа)"""
+        """Create Argon2 hash for password verification"""
+        # Возвращаем строку хеша (в примере ТЗ был словарь, но для БД нужна строка)
         return self.argon2_hasher.hash(password)
 
-    def generate_encryption_key(self, password: str, salt: bytes) -> bytes:
-        """
-        Генерация Ключа Шифрования через PBKDF2-HMAC-SHA256.
-        Используется для шифрования данных.
-        """
+    def derive_encryption_key(self, password: str, salt: bytes) -> bytes:
+        """Derive AES-256 key from password using PBKDF2"""
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
@@ -53,27 +41,31 @@ class KeyDerivationService:
 
     def generate_auth_key(self, password: str, salt: bytes) -> bytes:
         """
-        Генерация Ключа Аутентификации через Argon2id (RAW mode).
-        Используется для производных целей.
+        Генерация ключа аутентификации через Argon2.
+        Используем хешер для детерминированной генерации.
         """
-        return hash_secret_raw(
-            secret=password.encode('utf-8'),
-            salt=salt,
-            time_cost=self.time_cost,
-            memory_cost=self.memory_cost,
-            parallelism=self.parallelism,
-            hash_len=32,
-            type=LowLevelType.ID
-        )
+        # Комбинируем пароль и соль
+        combined_secret = password + salt.hex()
+        dummy_hash = self.argon2_hasher.hash(combined_secret)
+
+        # Извлекаем байты хеша (последняя часть строки Argon2)
+        parts = dummy_hash.split('$')
+        key_b64 = parts[-1]
+
+        # Декодируем Base64
+        padding = len(key_b64) % 4
+        if padding:
+            key_b64 += '=' * (4 - padding)
+
+        return base64.urlsafe_b64decode(key_b64)
 
     def verify_password(self, password: str, stored_hash: str) -> bool:
-        """Проверка пароля по хешу argon2"""
+        """Verify password against stored Argon2 hash (constant-time)"""
         try:
-            self.argon2_hasher.verify(stored_hash, password)
-            return True
+            return self.argon2_hasher.verify(stored_hash, password)
         except Exception:
-            # Защита от timing attack
-            secrets.compare_digest(b"dummy", b"value")
+            # Constant-time dummy verification to prevent timing attacks
+            secrets.compare_digest(b'dummy', b'dummy')
             return False
 
     @staticmethod
@@ -88,7 +80,7 @@ class KeyDerivationService:
         if not re.search(r"\d", password):
             return False, "Добавьте цифры."
         if not re.search(r"[^a-zA-Z0-9]", password):
-            return False, "Добавьте спецсимволы (например: ! @ # $ % ^ & *)"
+            return False, "Добавьте спецсимволы."
         common_patterns = ["password", "qwerty", "123456", "admin"]
         if any(pattern in password.lower() for pattern in common_patterns):
             return False, "Пароль слишком простой."

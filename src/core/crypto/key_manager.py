@@ -15,28 +15,23 @@ class KeyManager:
         return self.kdf.verify_password(password, stored_hash)
 
     def setup_new_user(self, password: str):
-        """
-        Первичная настройка: генерация солей, создание хеша и сохранение параметров.
-        Вызывается при регистрации.
-        """
-        # 1. Генерация уникальных солей (16 байт)
+        # 1. Генерация солей
         auth_salt = secrets.token_bytes(16)
         enc_salt = secrets.token_bytes(16)
 
-        # 2. Создание хеша пароля для проверки (Argon2)
-        # Используем встроенный генератор соли Argon2 для хеша проверки
+        # 2. Создание хеша пароля (Argon2)
         master_hash = self.kdf.create_auth_hash(password)
-
-        # 3. Сохранение параметров в БД
-        # Сохраняем хеш пароля
         self.db.save_setting("master_hash", master_hash)
 
-        # Сохраняем соли и параметры в key_store
+        # 3. Сохранение параметров ключей в таблицу key_store
+        # Исправлено: берем параметры из конфига по умолчанию или объекта kdf
+        # Но надежнее прописать явно, как в ТЗ
+
         auth_params = {
             "type": "argon2id",
-            "time_cost": self.kdf.time_cost,
-            "memory_cost": self.kdf.memory_cost,
-            "parallelism": self.kdf.parallelism
+            "time_cost": 3,
+            "memory_cost": 65536,
+            "parallelism": 4
         }
         self.db.save_key_store("auth_key", auth_salt, auth_params, version=1)
 
@@ -45,14 +40,9 @@ class KeyManager:
             "iterations": self.kdf.pbkdf2_iterations
         }
         self.db.save_key_store("encryption_key", enc_salt, enc_params, version=1)
-
         print("Параметры ключей успешно сохранены.")
 
-    def verify_and_unlock(self, password: str) -> bool:#проверка пароля и инициализация ключа в памяти
-        """
-                Проверка пароля и инициализация ключей в памяти.
-                """
-        # 1. Проверка пароля
+    def verify_and_unlock(self, password: str) -> bool:
         stored_hash = self.db.get_setting("master_hash")
         if not stored_hash:
             return False
@@ -60,26 +50,18 @@ class KeyManager:
         if not self.kdf.verify_password(password, stored_hash):
             return False
 
-        # 2. Загрузка параметров ключей из БД
         auth_store = self.db.get_key_store("auth_key")
         enc_store = self.db.get_key_store("encryption_key")
 
         if not auth_store or not enc_store:
-            print("Ошибка: параметры ключей не найдены в БД.")
+            print("Ошибка: параметры ключей не найдены.")
             return False
 
-        # 3. Генерация ключей на лету
-        # Ключ аутентификации (Argon2)
+        # Генерация ключей
         auth_key = self.kdf.generate_auth_key(password, auth_store['salt'])
+        enc_key = self.kdf.derive_encryption_key(password, enc_store['salt'])
 
-        # Ключ шифрования (PBKDF2)
-        enc_key = self.kdf.generate_encryption_key(password, enc_store['salt'])
-
-        # 4. Сохранение в защищенное хранилище (в памяти)
-        # Мы сохраняем оба ключа. Возможно, вам понадобится два слота в KeyStorage.
-        # Для простоты изменим KeyStorage, чтобы он хранил словарь ключей.
         self.storage.set_keys(auth_key, enc_key)
-
         return True
 
 
