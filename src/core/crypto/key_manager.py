@@ -1,6 +1,7 @@
 import os
 import secrets
 import base64
+import json
 from cryptography.fernet import Fernet
 from .key_derivation import KeyDerivationService
 from .key_storage import KeyStorage
@@ -15,41 +16,56 @@ class KeyManager:
         return self.kdf.verify_password(password, stored_hash)
 
     def setup_new_user(self, password: str):
-        #первичная настройка пользователя
+        #  генерация соли
         auth_salt = secrets.token_bytes(16)
         enc_salt = secrets.token_bytes(16)
 
+        # хеширование пароля
         master_hash = self.kdf.create_auth_hash(password)
         self.db.save_setting("master_hash", master_hash)
 
-        auth_params = {"type": "argon2id", "time_cost": 3, "memory_cost": 65536, "parallelism": 4}
-        self.db.save_key_store("auth_key", auth_salt, auth_params, version=1)
+        # сохранение соли в бд
+        self.db.save_key_store("auth_salt", auth_salt, version=1)
+        self.db.save_key_store("encryption_salt", enc_salt, version=1)
 
-        enc_params = {"type": "pbkdf2-sha256", "iterations": self.kdf.pbkdf2_iterations}
-        self.db.save_key_store("encryption_key", enc_salt, enc_params, version=1)
-        print("Параметры ключей успешно сохранены.")
+        # Сохранение параметров KDF
+        params = {
+            "argon2_time": 3,
+            "argon2_memory": 65536,
+            "argon2_parallelism": 4,
+            "pbkdf2_iterations": 100000
+        }
+        # Преобразуем словарь в байты для сохранения
+        self.db.save_key_store("kdf_params", json.dumps(params).encode('utf-8'), version=1)
+
+        print("Параметры ключей успешно сохранены (v2 schema).")
 
     def verify_and_unlock(self, password: str) -> bool:
-        #Вход в систему и загрузка ключей в память
+        # загрузка соли и генерация ключей
         stored_hash = self.db.get_setting("master_hash")
-        if not stored_hash or not self.kdf.verify_password(password, stored_hash):
+        if not stored_hash:
             return False
 
-        auth_data = self.db.get_key_store("auth_key")
-        enc_data = self.db.get_key_store("encryption_key")
-
-        if not auth_data or not enc_data or not auth_data[0] or not enc_data[0]:
-            print("Ошибка: соли не найдены в БД")
+        # проверка пароля
+        if not self.kdf.verify_password(password, stored_hash):
             return False
 
-        auth_salt = auth_data[0]
-        enc_salt = enc_data[0]
+        auth_salt_tuple = self.db.get_key_store("auth_salt")
+        enc_salt_tuple = self.db.get_key_store("encryption_salt")
+
+        # проверка на существование данных
+        if not auth_salt_tuple or not auth_salt_tuple[0] or not enc_salt_tuple or not enc_salt_tuple[0]:
+            print("Ошибка: соли не найдены в БД.")
+            return False
+
+        auth_salt = auth_salt_tuple[0]
+        enc_salt = enc_salt_tuple[0]
 
         # генерация ключей
         enc_key = self.kdf.derive_encryption_key(password, enc_salt)
         auth_key = self.kdf.generate_auth_key(password, auth_salt)
 
-        # охранение в память
+        # сохранение в память
         self.storage.set_keys(auth_key, enc_key)
         return True
 
@@ -62,8 +78,7 @@ class KeyManager:
                 return False
 
             # получение старой соли и генерация староко ключа
-            old_enc_data = self.db.get_key_store("encryption_key")
-            old_enc_salt = old_enc_data[0]
+            old_enc_salt, _ = self.db.get_key_store("encryption_salt")
             old_enc_key = self.kdf.derive_encryption_key(old_password, old_enc_salt)
             old_fernet = Fernet(base64.urlsafe_b64encode(old_enc_key))
 
@@ -104,7 +119,7 @@ class KeyManager:
             )
 
             # обновление ключа в оперативной памяти
-            self.storage.set_keys(b"", new_enc_key) # auth_key не важен для текущей сессии шифрования
+            self.storage.set_keys(b"", new_enc_key)
             return True
 
         except Exception as e:
@@ -113,3 +128,5 @@ class KeyManager:
 
     def get_encryption_key(self) -> bytes:
         return self.storage.get_enc_key()
+
+import json

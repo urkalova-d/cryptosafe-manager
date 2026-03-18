@@ -38,33 +38,41 @@ class DatabaseHelper:
             """)
             cursor.execute("""
                             CREATE TABLE IF NOT EXISTS key_store (
-                                key_id TEXT PRIMARY KEY,
-                                salt TEXT NOT NULL,
-                                params TEXT NOT NULL,
-                                version INTEGER DEFAULT 1
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key_type TEXT NOT NULL UNIQUE,
+                    key_data TEXT NOT NULL,
+                    version INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                             )
                         """)
-            self.conn.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES (?, ?)",
-                              ("kdf_type", "argon2id"))
+            cursor.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES (?, ?)",
+                           ("auto_lock_timeout", "3600"))
+            # Политика паролей: минимум 12 символов
+            cursor.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES (?, ?)",
+                           ("policy_min_length", "12"))
+
             self.conn.commit()
 
-    def save_key_store(self, key_id: str, salt: bytes, params: dict, version: int = 1):
-        #сохранение параметров генерации ключей
+    def save_key_store(self, key_type: str, key_data: bytes, version: int = 1):
+        #сохранение соли и параметров
+
         with self._lock:
             cursor = self.conn.cursor()
+            # Сохраняем hex-строку байтов
             cursor.execute("""
-                INSERT OR REPLACE INTO key_store (key_id, salt, params, version)
-                VALUES (?, ?, ?, ?)
-            """, (key_id, salt.hex(), json.dumps(params), version))
+                INSERT OR REPLACE INTO key_store (key_type, key_data, version, created_at)
+                VALUES (?, ?, ?, datetime('now'))
+            """, (key_type, key_data.hex(), version))
             self.conn.commit()
 
-    def get_key_store(self, key_id):
+    def get_key_store(self, key_type: str):
+        #возвращает байты данных ключа
         with self._lock:
             cursor = self.conn.cursor()
-            cursor.execute("SELECT salt, params FROM key_store WHERE key_id = ?", (key_id,))
+            cursor.execute("SELECT key_data, version FROM key_store WHERE key_type = ?", (key_type,))
             row = cursor.fetchone()
             if row:
-                return bytes.fromhex(row['salt']), json.loads(row['params'])
+                return bytes.fromhex(row['key_data']), row['version']
             return None, None
 
     def migrate_to_v2(self):

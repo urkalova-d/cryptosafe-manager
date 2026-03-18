@@ -1,4 +1,5 @@
 import sys
+import time
 from PyQt6.QtGui import QAction
 
 from src.database.db import DatabaseHelper
@@ -15,7 +16,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox,
 from src.core.crypto.key_manager import KeyManager
 from src.core.crypto.authentication import AuthenticationService
 from src.core.crypto.encryption_service import EncryptionService
-from PyQt6.QtCore import QEvent
+
 
 
 class LoadDataWorker(QObject):
@@ -229,6 +230,14 @@ class MainWindow(QMainWindow):
         else:
             self.show_login_dialog()
 
+    def show_setup_wizard(self):
+        from src.gui.setup_wizard import SetupWizard
+        wizard = SetupWizard(self)
+        wizard.setup_finished.connect(self.on_setup_complete)
+
+        if not wizard.exec():
+            sys.exit()# закрытиче крестиком
+
     def show_login_dialog(self):
         from src.gui.login_window import LoginWindow
         self.hide()
@@ -246,32 +255,30 @@ class MainWindow(QMainWindow):
             self.show_login_dialog()
 
     def verify_login(self, password):
+        #Вызывается при попытке входа
+        #Скрываем окно на время проверки
         self.hide()
 
         success = self.auth_service.login(password)
 
         if success:
             self.login_win.accept()
-            return
         else:
-            #  регистрирация попытки и подсчет задержки
+            # Формируем сообщение об ошибке
             attempts = self.auth_service._failed_attempts
-            delay = self.auth_service._calculate_delay()
-
-            #сообщение
             msg = "Неверный мастер-пароль!"
             if attempts < 5:
                 msg += f"\nОсталось попыток: {5 - attempts}"
             else:
+                delay = self.auth_service._calculate_delay()
                 msg += f"\nЗадержка перед следующей попыткой: {delay} сек."
 
-            self.login_win.show_error(msg)
+            if hasattr(self.login_win, 'show_error'):
+                self.login_win.show_error(msg)
+            else:
+                QMessageBox.critical(self, "Ошибка входа", msg)
 
-            # очистка поля
             self.login_win.password_input.clear()
-
-            # задержка
-            self.auth_service.apply_login_delay()
 
     def finalize_login(self):
         # метод для безопасного отображения интерфейса после логина
@@ -298,16 +305,21 @@ class MainWindow(QMainWindow):
 
     def handle_save(self, service, login, password, notes):
         try:
-            # 1сохранение в базу
-            self.db_helper.add_entry(service, login, password, notes)
+            # шифрование пароля перед сохранением
+            from src.core.crypto.encryption_service import EncryptionService
+            enc_svc = EncryptionService(self.key_manager)
+            encrypted_password = enc_svc.encrypt(password)
 
-            #2 обновление таблицы на экране
+            # сохранение шифрованного пароля в базе
+            self.db_helper.add_entry(service, login, encrypted_password, notes)
+
             self.table.add_record(service, login, password, notes, self.copy_to_clipboard)
 
-            #3обновление статуса
+            # обновлене статуса
             self.statusBar().showMessage(f"Запись {service} добавлена", 5000)
 
         except Exception as e:
+            print(f"Ошибка при сохранении: {e}")
             QMessageBox.critical(self, "Ошибка БД", f"Не удалось сохранить: {e}")
 
     def load_data_from_db(self):
@@ -400,32 +412,6 @@ class MainWindow(QMainWindow):
     def on_load_error(self, error_message):
         self.statusBar().showMessage(f"Ошибка: {error_message}")
 
-    def open_change_password(self):
-        from src.gui.password_change_dialog import PasswordChangeDialog
-        dialog = PasswordChangeDialog(self.key_manager, self.db_helper, self)
-
-        if dialog.exec():
-            # запуск прогресс бара
-            progress = QProgressDialog("Перешифрование хранилища...", "Отмена", 0, 100, self)
-            progress.setWindowModality(Qt.WindowModality.WindowModal)
-            progress.show()
-
-            def update_prg(val):
-                progress.setValue(val)
-                QApplication.processEvents()  # Чтобы интерфейс не замерзал
-
-            success = self.key_manager.rotate_keys(
-                dialog.old_password,
-                dialog.new_password,
-                progress_callback=update_prg
-            )
-
-            if success:
-                QMessageBox.information(self, "Успех", "Пароль успешно изменен!")
-                self.load_data_from_db()  # Обновляем таблицу
-            else:
-                QMessageBox.critical(self, "Ошибка", "Сбой при смене пароля. Данные не изменены.")
-
     def open_password_change_dialog(self):
         from src.gui.password_change_dialog import PasswordChangeDialog
 
@@ -504,5 +490,20 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.critical(self, "Ошибка",
                                  "Процесс был прерван или произошла ошибка. Данные могут быть повреждены.")
+
+    def on_setup_complete(self, password):
+        #Вызывается после успешной регистрации
+        try:
+            # сохранение нового мастер пароля и ключа в бд
+            self.key_manager.setup_new_user(password)
+
+            # вход
+            if self.auth_service.login(password):
+                self.load_data_from_db()
+                self.show()
+                QMessageBox.information(self, "Успех", "Аккаунт создан! Вы вошли в систему.")
+        except Exception as e:
+            print(f"Ошибка при завершении настройки: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось завершить настройку: {e}")
 
 
