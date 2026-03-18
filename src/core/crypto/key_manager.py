@@ -1,8 +1,9 @@
 import os
+import secrets
+import base64
+from cryptography.fernet import Fernet
 from .key_derivation import KeyDerivationService
 from .key_storage import KeyStorage
-import secrets
-
 
 class KeyManager:
     def __init__(self, db_helper):
@@ -11,62 +12,104 @@ class KeyManager:
         self.kdf = KeyDerivationService()
 
     def verify_password(self, password: str, stored_hash: str) -> bool:
-        # проверка пароля через argon2
         return self.kdf.verify_password(password, stored_hash)
 
     def setup_new_user(self, password: str):
-        # генерация соли
+        #первичная настройка пользователя
         auth_salt = secrets.token_bytes(16)
         enc_salt = secrets.token_bytes(16)
 
-        #  создание хеша пароля
         master_hash = self.kdf.create_auth_hash(password)
         self.db.save_setting("master_hash", master_hash)
 
-        auth_params = {
-            "type": "argon2id",
-            "time_cost": 3,
-            "memory_cost": 65536,
-            "parallelism": 4
-        }
+        auth_params = {"type": "argon2id", "time_cost": 3, "memory_cost": 65536, "parallelism": 4}
         self.db.save_key_store("auth_key", auth_salt, auth_params, version=1)
 
-        enc_params = {
-            "type": "pbkdf2-sha256",
-            "iterations": self.kdf.pbkdf2_iterations
-        }
+        enc_params = {"type": "pbkdf2-sha256", "iterations": self.kdf.pbkdf2_iterations}
         self.db.save_key_store("encryption_key", enc_salt, enc_params, version=1)
         print("Параметры ключей успешно сохранены.")
 
     def verify_and_unlock(self, password: str) -> bool:
+        #Вход в систему и загрузка ключей в память
         stored_hash = self.db.get_setting("master_hash")
-        if not stored_hash:
+        if not stored_hash or not self.kdf.verify_password(password, stored_hash):
             return False
 
-        if not self.kdf.verify_password(password, stored_hash):
+        auth_data = self.db.get_key_store("auth_key")
+        enc_data = self.db.get_key_store("encryption_key")
+
+        if not auth_data or not enc_data or not auth_data[0] or not enc_data[0]:
+            print("Ошибка: соли не найдены в БД")
             return False
 
-        auth_store = self.db.get_key_store("auth_key")
-        enc_store = self.db.get_key_store("encryption_key")
-
-        if not auth_store or not enc_store:
-            print("Ошибка: параметры ключей не найдены.")
-            return False
+        auth_salt = auth_data[0]
+        enc_salt = enc_data[0]
 
         # генерация ключей
-        auth_key = self.kdf.generate_auth_key(password, auth_store['salt'])
-        enc_key = self.kdf.derive_encryption_key(password, enc_store['salt'])
+        enc_key = self.kdf.derive_encryption_key(password, enc_salt)
+        auth_key = self.kdf.generate_auth_key(password, auth_salt)
 
+        # охранение в память
         self.storage.set_keys(auth_key, enc_key)
         return True
 
+    def rotate_keys(self, old_password, new_password, progress_callback=None):
+        #ротация ключей при смене пароля
+        try:
+            # проверка старого пароля
+            stored_hash = self.db.get_setting("master_hash")
+            if not self.kdf.verify_password(old_password, stored_hash):
+                return False
 
+            # получение старой соли и генерация староко ключа
+            old_enc_data = self.db.get_key_store("encryption_key")
+            old_enc_salt = old_enc_data[0]
+            old_enc_key = self.kdf.derive_encryption_key(old_password, old_enc_salt)
+            old_fernet = Fernet(base64.urlsafe_b64encode(old_enc_key))
 
+            #  генерация новой соли и ключа
+            new_auth_salt = secrets.token_bytes(16)
+            new_enc_salt = secrets.token_bytes(16)
+            new_enc_key = self.kdf.derive_encryption_key(new_password, new_enc_salt)
+            new_fernet = Fernet(base64.urlsafe_b64encode(new_enc_key))
+            new_master_hash = self.kdf.create_auth_hash(new_password)
 
+            #  перешифровка данных
+            records = self.db.get_all_entries()
+            total = len(records)
+            re_encrypted_list = []
+
+            for i, rec in enumerate(records):
+                try:
+                    if rec['encrypted_password']:
+                        # Расшифровываем старым ключом
+                        raw_data = old_fernet.decrypt(rec['encrypted_password'].encode()).decode()
+                        # Шифруем новым ключом
+                        new_val = new_fernet.encrypt(raw_data.encode()).decode()
+                        re_encrypted_list.append((rec['id'], new_val))
+                except Exception as e:
+                    print(f"Ошибка записи {rec['id']}: {e}")
+                    # Если не удалось расшифровать, сохраняем как есть или пропускаем
+                    continue
+
+                if progress_callback:
+                    progress_callback(int((i + 1) / total * 100))
+
+            # атомарное сохранение в бд
+            self.db.rotate_vault_keys(
+                new_master_hash,
+                new_auth_salt, {"type": "argon2id"},
+                new_enc_salt, {"type": "pbkdf2-sha256"},
+                re_encrypted_list
+            )
+
+            # обновление ключа в оперативной памяти
+            self.storage.set_keys(b"", new_enc_key) # auth_key не важен для текущей сессии шифрования
+            return True
+
+        except Exception as e:
+            print(f"Критическая ошибка ротации: {e}")
+            return False
 
     def get_encryption_key(self) -> bytes:
         return self.storage.get_enc_key()
-
-
-    def get_auth_key(self) -> bytes:
-        return self.storage.get_auth_key()

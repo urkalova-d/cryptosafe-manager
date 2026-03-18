@@ -10,12 +10,13 @@ from PyQt6.QtCore import Qt, QTimer, QEvent, QObject, pyqtSignal, QThread
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox,
                              QTableWidget, QApplication, QTableWidgetItem, QHeaderView,
                              QMenuBar, QMenu, QStatusBar, QToolBar, QLabel,
-                             QDialog, QLineEdit, QPushButton)
+                             QProgressDialog) # <--- Добавь это имя сюда
 
 from src.core.crypto.key_manager import KeyManager
 from src.core.crypto.authentication import AuthenticationService
 from src.core.crypto.encryption_service import EncryptionService
 from PyQt6.QtCore import QEvent
+
 
 class LoadDataWorker(QObject):
     # Сигнал передает список расшифрованных записей
@@ -33,6 +34,7 @@ class LoadDataWorker(QObject):
             self.finished.emit(records)
         except Exception as e:
             self.error.emit(str(e))
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -107,7 +109,6 @@ class MainWindow(QMainWindow):
 
         self.statusBar().showMessage("Вы успешно вошли в систему")
 
-
     def on_user_logged_out(self):
         # для события выхода
         print("Событие: UserLoggedOut")
@@ -139,6 +140,8 @@ class MainWindow(QMainWindow):
         add_action.triggered.connect(self.open_add_window)
         edit_menu.addAction("Редактировать")
         edit_menu.addAction("Удалить")
+        change_pwd_action = edit_menu.addAction("Сменить мастер-пароль")
+        change_pwd_action.triggered.connect(self.open_password_change_dialog)
 
         # просмотр
         view_menu = menubar.addMenu("Просмотр")
@@ -213,7 +216,6 @@ class MainWindow(QMainWindow):
         self.timer_label.setText("")
         self.status_bar.showMessage("Буфер обмена очищен", 3000)
 
-
     def copy_password(self, password):#функция копирования запускающая процесс
         QApplication.clipboard().setText(password)
         self.status_bar.showMessage("Пароль скопирован в буфер", 5000)
@@ -279,9 +281,6 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Сессия активна. Добро пожаловать!")
         except Exception as e:
             print(f"Ошибка при загрузке данных: {e}")
-
-
-
 
     def open_add_window(self):
         try:
@@ -400,5 +399,110 @@ class MainWindow(QMainWindow):
 
     def on_load_error(self, error_message):
         self.statusBar().showMessage(f"Ошибка: {error_message}")
+
+    def open_change_password(self):
+        from src.gui.password_change_dialog import PasswordChangeDialog
+        dialog = PasswordChangeDialog(self.key_manager, self.db_helper, self)
+
+        if dialog.exec():
+            # запуск прогресс бара
+            progress = QProgressDialog("Перешифрование хранилища...", "Отмена", 0, 100, self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.show()
+
+            def update_prg(val):
+                progress.setValue(val)
+                QApplication.processEvents()  # Чтобы интерфейс не замерзал
+
+            success = self.key_manager.rotate_keys(
+                dialog.old_password,
+                dialog.new_password,
+                progress_callback=update_prg
+            )
+
+            if success:
+                QMessageBox.information(self, "Успех", "Пароль успешно изменен!")
+                self.load_data_from_db()  # Обновляем таблицу
+            else:
+                QMessageBox.critical(self, "Ошибка", "Сбой при смене пароля. Данные не изменены.")
+
+    def open_password_change_dialog(self):
+        from src.gui.password_change_dialog import PasswordChangeDialog
+
+        dialog = PasswordChangeDialog(self.key_manager, self.db_helper, self)
+
+        if dialog.exec():
+            # Если диалог прошел валидацию -> начинаем процесс
+            old_pwd = dialog.current_pwd_input.text()
+            new_pwd = dialog.new_pwd_input.text()
+
+            # Создаем прогресс бар
+            progress = QProgressDialog("Перешифрование хранилища...", None, 0, 100, self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setWindowTitle("Смена пароля")
+            progress.show()
+
+            def update_progress(val):
+                progress.setValue(val)
+                QApplication.processEvents()  # Чтобы окно не зависало
+
+            # Запуск процесса
+            success = self.key_manager.rotate_keys(
+                old_pwd,
+                new_pwd,
+                progress_callback=update_progress
+            )
+
+            progress.close()
+
+            if success:
+                QMessageBox.information(self, "Успех", "Пароль успешно изменен! Данные обновлены.")
+                self.load_data_from_db()
+            else:
+                QMessageBox.critical(self, "Ошибка", "Не удалось сменить пароль. Проверьте консоль.")
+
+    def start_rotation_process(self, old_password, new_password):
+        # сохранение старого ключа для перешифровки
+        old_enc_key = self.key_manager.get_encryption_key()
+
+        # создание прогресс бар
+        self.progress_dialog = QProgressDialog("Перешифрование данных...", "Отмена", 0, 100, self)
+        self.progress_dialog.setWindowTitle("Смена пароля")
+        self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress_dialog.setAutoClose(False)
+        self.progress_dialog.setAutoReset(False)
+
+        #  запуск потока
+        self.thread = QThread()
+        self.worker = ReencryptWorker(self.db_helper, self.key_manager, old_enc_key)
+        self.worker.moveToThread(self.thread)
+
+        self.thread.started.connect(self.worker.run)
+        self.worker.progress.connect(self.progress_dialog.setValue)
+
+        # Логика завершения
+        self.worker.finished.connect(self.on_rotation_finished)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+
+        # Обработка отмены
+        self.progress_dialog.canceled.connect(self.worker.cancel)
+
+        # изменение пароля в системе key manager
+        if not self.key_manager.rotate_keys(old_password, new_password):
+            QMessageBox.critical(self, "Ошибка", "Не удалось обновить ключи безопасности.")
+            return
+
+        self.thread.start()
+        self.progress_dialog.show()
+
+    def on_rotation_finished(self, success):
+        self.progress_dialog.close()
+        if success:
+            QMessageBox.information(self, "Успех", "Мастер-пароль успешно изменен. Все данные перешифрованы.")
+        else:
+            QMessageBox.critical(self, "Ошибка",
+                                 "Процесс был прерван или произошла ошибка. Данные могут быть повреждены.")
 
 

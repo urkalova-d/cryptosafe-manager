@@ -1,5 +1,6 @@
 import os
 import secrets
+import json
 import base64
 from argon2 import PasswordHasher, Type
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -12,21 +13,32 @@ class KeyDerivationService:
         if config is None:
             config = {}
 
+            #  параметры Argon2id
+        self.time_cost = config.get('argon2_time', 3)
+        self.memory_cost = config.get('argon2_memory', 65536)  # 64 MiB
+        self.parallelism = config.get('argon2_parallelism', 4)
+
         self.argon2_hasher = PasswordHasher(
-            time_cost=config.get('argon2_time', 3),
-            memory_cost=config.get('argon2_memory', 65536),
-            parallelism=config.get('argon2_parallelism', 4),
+            time_cost=self.time_cost,
+            memory_cost=self.memory_cost,
+            parallelism=self.parallelism,
             hash_len=32,
             salt_len=16,
             type=Type.ID
         )
+
         self.pbkdf2_iterations = config.get('pbkdf2_iterations', 100000)
 
     def create_auth_hash(self, password: str) -> str:#argon2
         # Возвращаем строку хеша
         return self.argon2_hasher.hash(password)
 
-    def derive_encryption_key(self, password: str, salt: bytes) -> bytes:#PBKDF2
+    def derive_encryption_key(self, password: str, salt: bytes) -> bytes:
+        # PBKDF2
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.backends import default_backend
+
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
@@ -34,10 +46,10 @@ class KeyDerivationService:
             iterations=self.pbkdf2_iterations,
             backend=default_backend()
         )
-        return kdf.derive(password.encode('utf-8'))
+        return kdf.derive(password.encode())
 
     def generate_auth_key(self, password: str, salt: bytes) -> bytes:
-        #Генерация ключа аутентификации через Argon2.
+        #генерация ключа аутентификации через argon2
         # пароль+соль
         combined_secret = password + salt.hex()
         dummy_hash = self.argon2_hasher.hash(combined_secret)
@@ -57,7 +69,7 @@ class KeyDerivationService:
         try:
             return self.argon2_hasher.verify(stored_hash, password)
         except Exception:
-            # Constant-time dummy verification to prevent timing attacks
+            #  Проверка в режиме постоянного времени для предотвращения атак по времени
             secrets.compare_digest(b'dummy', b'dummy')
             return False
 

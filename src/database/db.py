@@ -58,19 +58,14 @@ class DatabaseHelper:
             """, (key_id, salt.hex(), json.dumps(params), version))
             self.conn.commit()
 
-    def get_key_store(self, key_id: str):
-        #получение параметров генерации ключей
+    def get_key_store(self, key_id):
         with self._lock:
             cursor = self.conn.cursor()
-            cursor.execute("SELECT salt, params, version FROM key_store WHERE key_id = ?", (key_id,))
-            result = cursor.fetchone()
-            if result:
-                return {
-                    'salt': bytes.fromhex(result['salt']),
-                    'params': json.loads(result['params']),
-                    'version': result['version']
-                }
-            return None
+            cursor.execute("SELECT salt, params FROM key_store WHERE key_id = ?", (key_id,))
+            row = cursor.fetchone()
+            if row:
+                return bytes.fromhex(row['salt']), json.loads(row['params'])
+            return None, None
 
     def migrate_to_v2(self):
         #Простая система миграции
@@ -80,26 +75,18 @@ class DatabaseHelper:
 
 
     def save_setting(self, key, value):
-        #сохранение или обновление настройки в базе
         with self._lock:
-            cursor = self.conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO settings (setting_key, setting_value)
-                VALUES (?, ?)
-            """, (key, str(value)))
+            self.conn.execute("INSERT OR REPLACE INTO settings (setting_key, setting_value) VALUES (?, ?)",
+                              (key, str(value)))
             self.conn.commit()
 
     def get_setting(self, key):
         #получение значения настройки по ключу
         with self._lock:
-            try:
-                cursor = self.conn.cursor()
-                cursor.execute("SELECT setting_value FROM settings WHERE setting_key = ?", (key,))
-                result = cursor.fetchone()
-                # Поскольку используем Row, извлекаем по имени колонки
-                return result['setting_value'] if result else None
-            except (sqlite3.OperationalError, TypeError, AttributeError):
-                return None
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT setting_value FROM settings WHERE setting_key = ?", (key,))
+            row = cursor.fetchone()
+            return row[0] if row else None
 
     def save_master_password(self, password):
         #хеширует пароль через argon2 и сохраняет в настройки
@@ -128,7 +115,6 @@ class DatabaseHelper:
         return input_hash == stored_hash
 
     def add_entry(self, service, username, encrypted_password, notes=""):
-        #добавление новой записи
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute("""
@@ -139,7 +125,6 @@ class DatabaseHelper:
             return cursor.lastrowid
 
     def get_all_entries(self):
-        #Возвращает все записи в виде списка
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute("SELECT * FROM vault_entries")
@@ -150,5 +135,40 @@ class DatabaseHelper:
         if hasattr(self, 'conn') and self.conn:
             self.conn.close()
 
+    def rotate_vault_keys(self, new_master_hash, new_auth_salt, auth_params,
+                          new_enc_salt, enc_params, re_encrypted_data):
+        # Атомарный откат и обновление.
+        with self._lock:
+            try:
+                self.conn.execute("BEGIN TRANSACTION")
+
+                #обновление мастер хеша
+                self.conn.execute("INSERT OR REPLACE INTO settings (setting_key, setting_value) VALUES (?, ?)",
+                                  ("master_hash", new_master_hash))
+
+                # обновление параметровв key_store
+                self.conn.execute("INSERT OR REPLACE INTO key_store (key_id, salt, params) VALUES (?, ?, ?)",
+                                  ("auth_key", new_auth_salt.hex(), json.dumps(auth_params)))
+
+                self.conn.execute("INSERT OR REPLACE INTO key_store (key_id, salt, params) VALUES (?, ?, ?)",
+                                  ("encryption_key", new_enc_salt.hex(), json.dumps(enc_params)))
+
+                #  обновление всех записей
+                for entry_id, new_password_enc in re_encrypted_data:
+                    self.conn.execute(
+                        "UPDATE vault_entries SET encrypted_password = ? WHERE id = ?",
+                        (new_password_enc, entry_id)
+                    )
+
+                self.conn.commit()
+                return True
+            except Exception as e:
+                self.conn.rollback()  # откат при любой ошибке
+                print(f"Ошибка при ротации в БД (произведен откат): {e}")
+                raise e
+
+    def close(self):
+        if hasattr(self, 'conn') and self.conn:
+            self.conn.close()
 # Глобальный экземпляр для приложения
 db_manager = DatabaseHelper(db_path="vault.db")
