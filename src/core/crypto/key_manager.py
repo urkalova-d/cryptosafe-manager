@@ -15,17 +15,13 @@ class KeyManager:
         return self.kdf.verify_password(password, stored_hash)
 
     def setup_new_user(self, password: str):
-        # 1. Генерация солей
+        # генерация соли
         auth_salt = secrets.token_bytes(16)
         enc_salt = secrets.token_bytes(16)
 
-        # 2. Создание хеша пароля (Argon2)
+        #  создание хеша пароля
         master_hash = self.kdf.create_auth_hash(password)
         self.db.save_setting("master_hash", master_hash)
-
-        # 3. Сохранение параметров ключей в таблицу key_store
-        # Исправлено: берем параметры из конфига по умолчанию или объекта kdf
-        # Но надежнее прописать явно, как в ТЗ
 
         auth_params = {
             "type": "argon2id",
@@ -57,7 +53,7 @@ class KeyManager:
             print("Ошибка: параметры ключей не найдены.")
             return False
 
-        # Генерация ключей
+        # генерация ключей
         auth_key = self.kdf.generate_auth_key(password, auth_store['salt'])
         enc_key = self.kdf.derive_encryption_key(password, enc_store['salt'])
 

@@ -49,7 +49,7 @@ class DatabaseHelper:
             self.conn.commit()
 
     def save_key_store(self, key_id: str, salt: bytes, params: dict, version: int = 1):
-        """Сохранение параметров генерации ключей"""
+        #сохранение параметров генерации ключей
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute("""
@@ -59,7 +59,7 @@ class DatabaseHelper:
             self.conn.commit()
 
     def get_key_store(self, key_id: str):
-        """Получение параметров генерации ключей"""
+        #получение параметров генерации ключей
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute("SELECT salt, params, version FROM key_store WHERE key_id = ?", (key_id,))
@@ -104,11 +104,8 @@ class DatabaseHelper:
     def save_master_password(self, password):
         #хеширует пароль через argon2 и сохраняет в настройки
         #from src.core.crypto.key_derivation import KeyDerivationService
-
         #kdf = KeyDerivationService()
-
         #master_hash = kdf.create_auth_hash(password)
-
         # сохранение хеш строки
         #self.save_setting("master_hash", master_hash)
         pass
@@ -149,7 +146,7 @@ class DatabaseHelper:
             return [dict(row) for row in cursor.fetchall()]
 
     def close(self):
-        #Закрывает соединение с базой
+        #закрывает соединение с базой
         if hasattr(self, 'conn') and self.conn:
             self.conn.close()
 

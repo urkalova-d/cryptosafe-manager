@@ -1,71 +1,87 @@
 import time
+from PyQt6.QtCore import QObject, pyqtSignal
 
 
-class AuthenticationService:
-    def __init__(self, key_manager, db_manager, timeout_seconds=60):
+class AuthenticationService(QObject):
+    UserLoggedIn = pyqtSignal()
+    UserLoggedOut = pyqtSignal()
+
+    def __init__(self, key_manager, db_manager, timeout_seconds=3600):
+        super().__init__()
+
         self.key_manager = key_manager
         self.db_manager = db_manager
         self.timeout_seconds = timeout_seconds
+
         self._is_authenticated = False
         self._last_activity = 0
-        self._is_paused = False  # Флаг для режима "свернуто"
+        self._login_timestamp = 0
+
+        # AUTH-4: Счетчики
+        self._failed_attempts = 0
+        self._last_failed_time = 0
 
     def login(self, password: str) -> bool:
-        # Получение сохраненного хеша из базы
+        # Проверяет пароль и разблокирует ключи
         stored_hash = self.db_manager.get_setting("master_hash")
-
         if not stored_hash:
             return False
 
+        # проверка пароля
         if self.key_manager.kdf.verify_password(password, stored_hash):
-            # Если хеш верен, генерируем и разблокируем ключи в памяти
             if self.key_manager.verify_and_unlock(password):
                 self._is_authenticated = True
+                self._failed_attempts = 0  # сброс счетчика
                 self.update_activity()
+                self._login_timestamp = time.time()
+                self.UserLoggedIn.emit()
                 return True
 
+        # при не правилном пароле фиксируется попытка
+        self._register_failed_attempt()
         return False
 
+    def apply_login_delay(self):
+         #задержка после неудачной попытки.
+        delay = self._calculate_delay()
+        if delay > 0:
+            print(f"Security delay applied: {delay}s")
+            time.sleep(delay)
+
+    def _calculate_delay(self) -> int:
+        # сброс счетчика когда прошло 5 минут
+        if time.time() - self._last_failed_time > 300:
+            self._failed_attempts = 0
+
+        if self._failed_attempts < 2:
+            return 0
+        elif self._failed_attempts < 4:
+            return 5
+        else:
+            return 30
+
+    def _register_failed_attempt(self):
+        self._failed_attempts += 1
+        self._last_failed_time = time.time()
+
     def logout(self):
-        #завершение сессии и очистка ключей из памяти
         self._is_authenticated = False
-        self._is_paused = False
-        self.key_manager.storage.clear()
-        print("Сессия завершена, ключи удалены.")
+        self._login_timestamp = 0
+        if hasattr(self, 'key_manager'):
+            self.key_manager.storage.clear()
+        self.UserLoggedOut.emit()
 
     def update_activity(self):
-        # обновление времени от последнего действия
         self._last_activity = time.time()
-
-    def pause_session(self):
-        """Вызывается при сворачивании/потере фокуса"""
-        self._is_paused = True
-        # Опционально: можно сразу очистить ключи или просто остановить таймер
-
-    def resume_session(self):
-        """Вызывается при возврате в окно"""
-        self._is_paused = False
-        self.update_activity()
 
     def check_session(self) -> bool:
         if not self._is_authenticated:
-            return True  # если еще не вошли то не закрывать
+            return True
 
-            # Если сессия на паузе (окно свернуто), таймер не тикает (или тикает, но можно требовать пароль при возврате)
-            # Согласно ТЗ: "Key cache must implement automatic expiration ... When application minimized"
-            # Реализуем логику: если свернуты -> считаем как неактивность или требуем блокировку
-
-        if self._is_paused:
-            # Вариант: при сворачивании сессия держится, но не активна.
-            # Для строгого соответствия ТЗ можно возвращать False, если прошло много времени
-            pass
-        import time
         elapsed = time.time() - self._last_activity
-        # print(f"прошло времени: {int(elapsed)} сек. лимит: {self.timeout_seconds}")
         if elapsed > self.timeout_seconds:
-            #print("таймаут закрытие сессии")
-            self.logout()  # очистка ключа
-            return False  # конец сессии
+            self.logout()
+            return False
 
         return True
 

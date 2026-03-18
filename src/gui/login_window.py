@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt
+
 
 class LoginWindow(QDialog):
     login_attempt = pyqtSignal(str)
@@ -8,13 +9,16 @@ class LoginWindow(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Вход в систему")
         self.setFixedSize(300, 150)
-        self.setModal(True)
+
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
 
         layout = QVBoxLayout()
 
         layout.addWidget(QLabel("Введите мастер-пароль:"))
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        #  возврат по enter
+        self.password_input.returnPressed.connect(self.handle_login)
         layout.addWidget(self.password_input)
 
         self.btn_login = QPushButton("Войти")
@@ -27,4 +31,8 @@ class LoginWindow(QDialog):
         password = self.password_input.text()
         if password:
             self.login_attempt.emit(password)
-            self.accept()
+
+    def show_error(self, message):
+        QMessageBox.critical(self, "Ошибка входа", message)
+        self.password_input.clear()
+        self.password_input.setFocus()

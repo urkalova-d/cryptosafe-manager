@@ -12,7 +12,6 @@ class KeyDerivationService:
         if config is None:
             config = {}
 
-        # Структура в точности как в примере ТЗ
         self.argon2_hasher = PasswordHasher(
             time_cost=config.get('argon2_time', 3),
             memory_cost=config.get('argon2_memory', 65536),
@@ -23,13 +22,11 @@ class KeyDerivationService:
         )
         self.pbkdf2_iterations = config.get('pbkdf2_iterations', 100000)
 
-    def create_auth_hash(self, password: str) -> str:
-        """Create Argon2 hash for password verification"""
-        # Возвращаем строку хеша (в примере ТЗ был словарь, но для БД нужна строка)
+    def create_auth_hash(self, password: str) -> str:#argon2
+        # Возвращаем строку хеша
         return self.argon2_hasher.hash(password)
 
-    def derive_encryption_key(self, password: str, salt: bytes) -> bytes:
-        """Derive AES-256 key from password using PBKDF2"""
+    def derive_encryption_key(self, password: str, salt: bytes) -> bytes:#PBKDF2
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
@@ -40,15 +37,12 @@ class KeyDerivationService:
         return kdf.derive(password.encode('utf-8'))
 
     def generate_auth_key(self, password: str, salt: bytes) -> bytes:
-        """
-        Генерация ключа аутентификации через Argon2.
-        Используем хешер для детерминированной генерации.
-        """
-        # Комбинируем пароль и соль
+        #Генерация ключа аутентификации через Argon2.
+        # пароль+соль
         combined_secret = password + salt.hex()
         dummy_hash = self.argon2_hasher.hash(combined_secret)
 
-        # Извлекаем байты хеша (последняя часть строки Argon2)
+        # Извлекаем байты хеша
         parts = dummy_hash.split('$')
         key_b64 = parts[-1]
 
@@ -60,7 +54,6 @@ class KeyDerivationService:
         return base64.urlsafe_b64decode(key_b64)
 
     def verify_password(self, password: str, stored_hash: str) -> bool:
-        """Verify password against stored Argon2 hash (constant-time)"""
         try:
             return self.argon2_hasher.verify(stored_hash, password)
         except Exception:

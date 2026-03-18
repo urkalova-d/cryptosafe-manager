@@ -5,13 +5,12 @@ from src.database.db import DatabaseHelper
 from src.gui.setup_wizard import SetupWizard
 from src.gui.add_record_window import AddRecordWindow
 from src.gui.widgets.secure_table import SecureTable
-from PyQt6.QtCore import Qt, QTimer, QEvent
+from PyQt6.QtCore import Qt, QTimer, QEvent, QObject, pyqtSignal, QThread
 
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox,
-                             QTableWidget,QApplication, QTableWidgetItem, QHeaderView,
-                             QMenuBar, QMenu, QStatusBar, QToolBar, QLabel)
-
-from PyQt6.QtCore import QObject, pyqtSignal, QThread
+                             QTableWidget, QApplication, QTableWidgetItem, QHeaderView,
+                             QMenuBar, QMenu, QStatusBar, QToolBar, QLabel,
+                             QDialog, QLineEdit, QPushButton)
 
 from src.core.crypto.key_manager import KeyManager
 from src.core.crypto.authentication import AuthenticationService
@@ -40,37 +39,39 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("CryptoSafe Password Manager")
         self.resize(1000, 650)
 
-        # инициализация базы данных и переменных
+        #инициализация бд
         from src.database.db import db_manager
         self.db_helper = db_manager
         self.current_master_password = None
 
-        # настройка таймера очистки
-        self.clipboard_timer = QTimer()
+        # таймер
+        self.clipboard_timer = QTimer()  # <--- Создаем таймер здесь
         self.clipboard_timer.timeout.connect(self.update_timer_label)
         self.remaining_time = 0
 
-        # построение интерфейса
-        self.init_ui()
-
-        QTimer.singleShot(100, self.check_first_run)
-
-        self.loading_thread = None
-        #инициализация криптостека
+        # кр
         self.key_manager = KeyManager(self.db_helper)
-        self.auth_service = AuthenticationService(self.key_manager,self.db_helper, timeout_seconds=3600)# завершение сессии через час
-        self.encryption_service = EncryptionService(self.key_manager)
+        self.auth_service = AuthenticationService(self.key_manager, self.db_helper, timeout_seconds=3600)
 
+        # Подключение сигналов
+        self.auth_service.UserLoggedIn.connect(self.on_user_logged_in)
+        self.auth_service.UserLoggedOut.connect(self.on_user_logged_out)
 
+        # таймер сессии
         self.session_timer = QTimer(self)
         self.session_timer.timeout.connect(self.check_user_session)
-        self.session_timer.start(5000)  # проверка каждые 5 секунд
-        # установка фильтр на все приложение
+        self.session_timer.start(5000)
+
+        # фильтр событий
         QApplication.instance().installEventFilter(self)
 
+        self.init_ui()
+        self.hide()
+        #проверка первого запуска
+        QTimer.singleShot(100, self.check_first_run)
 
 
-    def init_ui(self):  #Инициализация всех графических компонентов
+    def init_ui(self):
 
         #центральный виджет
         self.central_widget = QWidget()
@@ -85,31 +86,39 @@ class MainWindow(QMainWindow):
         self.start_clipboard_timer(30)
 
     def eventFilter(self, obj, event):
+        # активность на экране для таймера
         if event.type() in [QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress]:
-            if hasattr(self, 'auth_service'):
+            if hasattr(self, 'auth_service') and self.auth_service.is_authenticated():
                 self.auth_service.update_activity()
 
-        # ВАЖНО: Обязательно верните результат родительского метода
         return super().eventFilter(obj, event)
 
     def closeEvent(self, event):
-        # Point 4: Application closes
         print("Закрытие приложения -> Очистка памяти")
         self.auth_service.logout()
         super().closeEvent(event)
 
+    def on_user_logged_in(self):
+        print("Событие: UserLoggedIn")
+        self.load_data_from_db()
+
+        # показ главного окна
+        self.show()
+
+        self.statusBar().showMessage("Вы успешно вошли в систему")
+
+
+    def on_user_logged_out(self):
+        # для события выхода
+        print("Событие: UserLoggedOut")
+        self.hide()
+        QMessageBox.information(self, "Сессия завершена", "Вы были автоматически вышли из системы.")
+        self.show_login_dialog()
+
     def check_user_session(self):
-        # Проверка сессии
-        if self.auth_service.is_authenticated():
-            # Сессия активна
+        # проверка тайминга сессии
+        if not self.auth_service.check_session():
             pass
-        else:
-            # Сессия истекла или была заблокирована
-            if self.auth_service._is_authenticated is False:
-                # Если logout уже произошел внутри auth_service
-                QMessageBox.warning(self, "Сессия истекла", "Время ожидания вышло или окно было свернуто.")
-                self.close()
-                QApplication.quit()
 
     def create_app_menu(self):
 
@@ -150,7 +159,7 @@ class MainWindow(QMainWindow):
         toolbar.addAction(add_action)
 
     def create_table_area(self):
-        #Создание таблицы
+        #создание таблицы
         self.table = SecureTable()
         self.main_layout.addWidget(self.table)
 
@@ -211,24 +220,22 @@ class MainWindow(QMainWindow):
         self.start_clipboard_timer(30)
 
     def check_first_run(self):
-        #проверка хеша мастер пароля в базе
+        #переключение setup login
         master_hash = self.db_helper.get_setting("master_hash")
-
         if not master_hash:
-            # если хеша нет запуск регистрации
-            QTimer.singleShot(100, self.show_setup_wizard)
+            self.show_setup_wizard()
         else:
-            # если хеш есть показываем вход
-            QTimer.singleShot(100, self.show_login_dialog)
+            self.show_login_dialog()
 
-    def show_setup_wizard(self):
-        from src.gui.setup_wizard import SetupWizard
-        wizard = SetupWizard(self)
-        wizard.setup_finished.connect(self.on_setup_complete)
+    def show_login_dialog(self):
+        from src.gui.login_window import LoginWindow
+        self.hide()
 
-        if not wizard.exec():
-            self.close()
-            sys.exit()  # закрытие через крестик
+        self.login_win = LoginWindow(self)
+        self.login_win.login_attempt.connect(self.verify_login)
+
+        if not self.login_win.exec():
+            sys.exit(0) # закрытие через крестик
 
     def _run_logic(self):
         if not self.db_helper.get_setting("master_hash"):
@@ -236,26 +243,33 @@ class MainWindow(QMainWindow):
         else:
             self.show_login_dialog()
 
-    def show_login_dialog(self):
-        from src.gui.login_window import LoginWindow
-        self.login_win = LoginWindow(self)
-        self.login_win.login_attempt.connect(self.verify_login)
-
-        if not self.login_win.exec():
-            sys.exit()
-
     def verify_login(self, password):
-        # auth_service.login должен вызывать key_manager.verify_and_unlock
-        if self.auth_service.login(password):
-            self.current_master_password = password
-            self.login_win.accept()
+        self.hide()
 
-            if hasattr(self, 'session_timer'):
-                self.session_timer.start(5000)
-            QTimer.singleShot(100, self.finalize_login)
+        success = self.auth_service.login(password)
+
+        if success:
+            self.login_win.accept()
+            return
         else:
-            QMessageBox.critical(self, "Ошибка", "Неверный мастер-пароль!")
+            #  регистрирация попытки и подсчет задержки
+            attempts = self.auth_service._failed_attempts
+            delay = self.auth_service._calculate_delay()
+
+            #сообщение
+            msg = "Неверный мастер-пароль!"
+            if attempts < 5:
+                msg += f"\nОсталось попыток: {5 - attempts}"
+            else:
+                msg += f"\nЗадержка перед следующей попыткой: {delay} сек."
+
+            self.login_win.show_error(msg)
+
+            # очистка поля
             self.login_win.password_input.clear()
+
+            # задержка
+            self.auth_service.apply_login_delay()
 
     def finalize_login(self):
         # метод для безопасного отображения интерфейса после логина
@@ -266,25 +280,8 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"Ошибка при загрузке данных: {e}")
 
-    def on_setup_complete(self, password):
-        try:
-            # Инициализация ключей и сохранение параметров в БД
-            self.key_manager.setup_new_user(password)
 
-            self.current_master_password = password
 
-            # Активация сессии (автоматический вход после регистрации)
-            if self.auth_service.login(password):  # login внутри себя вызовет verify_and_unlock
-                self.load_data_from_db()
-                self.show()
-
-                if hasattr(self, 'session_timer'):
-                    self.session_timer.start(5000)
-
-                QMessageBox.information(self, "Успех", "Мастер-пароль установлен и сессия активна!")
-        except Exception as e:
-            print(f"Ошибка при завершении настройки: {e}")
-            QMessageBox.critical(self, "Ошибка", f"Не удалось завершить настройку: {e}")
 
     def open_add_window(self):
         try:
@@ -325,17 +322,29 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("База данных пуста", 5000)
                 return
 
+            from src.core.crypto.encryption_service import EncryptionService
+            encryption_svc = EncryptionService(self.key_manager)
+
             for rec in records:
                 service_name = rec.get('service', 'Unknown')
                 username = rec.get('username', '')
-                password = rec.get('encrypted_password', '')
+                enc_password = rec.get('encrypted_password', '')
                 notes = rec.get('notes', '')
 
-                # Добавляем в таблицу, передавая callback для копирования
+                try:
+                    # Если пароль не пустой, пытаемся расшифровать
+                    if enc_password:
+                        decrypted_password = encryption_svc.decrypt(enc_password)
+                    else:
+                        decrypted_password = ""
+                except Exception as e:
+                    print(f"Ошибка расшифровки пароля для {service_name}: {e}")
+                    decrypted_password = "ОШИБКА"  # Или оставляем шифротекст
+
                 self.table.add_record(
                     service_name,
                     username,
-                    password,
+                    decrypted_password,
                     notes,
                     self.copy_to_clipboard
                 )
@@ -392,13 +401,4 @@ class MainWindow(QMainWindow):
     def on_load_error(self, error_message):
         self.statusBar().showMessage(f"Ошибка: {error_message}")
 
-    def check_user_session(self):
-        # проверка для блокировки
-        if not self.auth_service.check_session():
-            if hasattr(self, 'session_timer'):
-                self.session_timer.stop()
-
-            QMessageBox.warning(self, "Сессия истекла", "Время ожидания вышло. Приложение будет закрыто.")
-            self.close()
-            QApplication.quit()
 
