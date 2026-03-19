@@ -145,32 +145,28 @@ class DatabaseHelper:
 
 
     def rotate_vault_keys(self, new_master_hash, new_auth_salt, new_enc_salt, re_encrypted_data):
-        """
-        Атомарное обновление хеша, солей и перешифрованных паролей.
-        Принимает 4 аргумента (плюс self).
-        """
+        # Атомарное обновление хеша, солей и перешифрованных паролей.
+
         with self._lock:
             try:
                 self.conn.execute("BEGIN TRANSACTION")
 
-                # 1. Обновляем мастер-хеш
+                # обновление мастре хеша
                 self.conn.execute("INSERT OR REPLACE INTO settings (setting_key, setting_value) VALUES (?, ?)",
                                   ("master_hash", new_master_hash))
 
-                # 2. Обновляем соли в таблице key_store
-                # auth_salt
+                # обновление соли
                 self.conn.execute("""
                     INSERT OR REPLACE INTO key_store (key_type, key_data, version, created_at)
                     VALUES (?, ?, 1, datetime('now'))
                 """, ("auth_salt", new_auth_salt.hex()))
 
-                # encryption_salt
                 self.conn.execute("""
                     INSERT OR REPLACE INTO key_store (key_type, key_data, version, created_at)
                     VALUES (?, ?, 1, datetime('now'))
                 """, ("encryption_salt", new_enc_salt.hex()))
 
-                # 3. Обновляем пароли записей
+                # обновление записи паролей
                 for entry_id, new_password_enc in re_encrypted_data:
                     self.conn.execute(
                         "UPDATE vault_entries SET encrypted_password = ? WHERE id = ?",

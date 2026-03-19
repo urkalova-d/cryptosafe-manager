@@ -17,9 +17,18 @@ class AuthenticationService(QObject):
         self._last_activity = 0
         self._login_timestamp = 0
 
-        # AUTH-4: Счетчики
+        # четчики
         self._failed_attempts = 0
         self._last_failed_time = 0
+
+    def verify_mfa(self, code: str) -> bool:#метод для интеграции с будущими спринтами
+        if not code:
+            return True
+        return True
+
+    def is_mfa_enabled(self) -> bool:
+        #проверка включен ли mfa
+        return False
 
     def login(self, password: str) -> bool:
         # Проверяет пароль и разблокирует ключи
