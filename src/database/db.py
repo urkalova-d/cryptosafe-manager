@@ -143,25 +143,34 @@ class DatabaseHelper:
         if hasattr(self, 'conn') and self.conn:
             self.conn.close()
 
-    def rotate_vault_keys(self, new_master_hash, new_auth_salt, auth_params,
-                          new_enc_salt, enc_params, re_encrypted_data):
-        # Атомарный откат и обновление.
+
+    def rotate_vault_keys(self, new_master_hash, new_auth_salt, new_enc_salt, re_encrypted_data):
+        """
+        Атомарное обновление хеша, солей и перешифрованных паролей.
+        Принимает 4 аргумента (плюс self).
+        """
         with self._lock:
             try:
                 self.conn.execute("BEGIN TRANSACTION")
 
-                #обновление мастер хеша
+                # 1. Обновляем мастер-хеш
                 self.conn.execute("INSERT OR REPLACE INTO settings (setting_key, setting_value) VALUES (?, ?)",
                                   ("master_hash", new_master_hash))
 
-                # обновление параметровв key_store
-                self.conn.execute("INSERT OR REPLACE INTO key_store (key_id, salt, params) VALUES (?, ?, ?)",
-                                  ("auth_key", new_auth_salt.hex(), json.dumps(auth_params)))
+                # 2. Обновляем соли в таблице key_store
+                # auth_salt
+                self.conn.execute("""
+                    INSERT OR REPLACE INTO key_store (key_type, key_data, version, created_at)
+                    VALUES (?, ?, 1, datetime('now'))
+                """, ("auth_salt", new_auth_salt.hex()))
 
-                self.conn.execute("INSERT OR REPLACE INTO key_store (key_id, salt, params) VALUES (?, ?, ?)",
-                                  ("encryption_key", new_enc_salt.hex(), json.dumps(enc_params)))
+                # encryption_salt
+                self.conn.execute("""
+                    INSERT OR REPLACE INTO key_store (key_type, key_data, version, created_at)
+                    VALUES (?, ?, 1, datetime('now'))
+                """, ("encryption_salt", new_enc_salt.hex()))
 
-                #  обновление всех записей
+                # 3. Обновляем пароли записей
                 for entry_id, new_password_enc in re_encrypted_data:
                     self.conn.execute(
                         "UPDATE vault_entries SET encrypted_password = ? WHERE id = ?",
@@ -171,12 +180,10 @@ class DatabaseHelper:
                 self.conn.commit()
                 return True
             except Exception as e:
-                self.conn.rollback()  # откат при любой ошибке
+                self.conn.rollback()
                 print(f"Ошибка при ротации в БД (произведен откат): {e}")
                 raise e
 
-    def close(self):
-        if hasattr(self, 'conn') and self.conn:
-            self.conn.close()
+
 # Глобальный экземпляр для приложения
 db_manager = DatabaseHelper(db_path="vault.db")

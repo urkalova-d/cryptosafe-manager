@@ -113,8 +113,8 @@ class KeyManager:
             # атомарное сохранение в бд
             self.db.rotate_vault_keys(
                 new_master_hash,
-                new_auth_salt, {"type": "argon2id"},
-                new_enc_salt, {"type": "pbkdf2-sha256"},
+                new_auth_salt,
+                new_enc_salt,
                 re_encrypted_list
             )
 
