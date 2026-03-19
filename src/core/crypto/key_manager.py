@@ -69,6 +69,27 @@ class KeyManager:
         self.storage.set_keys(auth_key, enc_key)
         return True
 
+    def get_special_key(self, purpose: str) -> bytes:
+        #Возвращает специализированный ключ, ключ выводится из мастер ключа шифрования с использованием HKDF
+
+        master_key = self.storage.get_enc_key()
+        if not master_key:
+            raise PermissionError("Хранилище заблокировано. Сначала выполните вход.")
+
+        return self.kdf.derive_special_key(master_key, purpose)
+
+    def get_audit_key(self) -> bytes:
+        # ключ для подписи записей в журнале аудита
+        return self.get_special_key("audit_signing")
+
+    def get_export_key(self) -> bytes:
+        # ключ для шифрования экспортируемых данных
+        return self.get_special_key("export_encryption")
+
+    def get_totp_key(self) -> bytes:
+        #ключ для защиты секретов totp
+        return self.get_special_key("totp_derivation")
+
     def rotate_keys(self, old_password, new_password, progress_callback=None):
         #ротация ключей при смене пароля
         try:

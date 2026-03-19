@@ -65,6 +65,22 @@ class KeyDerivationService:
 
         return base64.urlsafe_b64decode(key_b64)
 
+    def derive_special_key(self, master_key: bytes, purpose: str, salt: bytes = None) -> bytes:
+        #генерация специализированных ключей на основе мастер ключ
+        if salt is None:
+            #  фиксированная соль в рамках сессии
+            salt = b'cryptosafe_special_salt_v1'
+
+        hkdf = HKDF(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            info=purpose.encode('utf-8'),
+            backend=default_backend()
+        )
+        return hkdf.derive(master_key)
+
+
     def verify_password(self, password: str, stored_hash: str) -> bool:
         try:
             return self.argon2_hasher.verify(stored_hash, password)
