@@ -10,14 +10,13 @@ from src.core.crypto.key_derivation import KeyDerivationService
 from src.core.crypto.key_storage import KeyStorage
 from src.core.crypto.key_manager import KeyManager
 
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-#  путь к проекту
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 
 @pytest.fixture
 def kdf_service():
-    # Создает сервис генерации ключей с параметрами по умолчанию"""
+    # Создает сервис генерации ключей с параметрами по умолчанию
     return KeyDerivationService()
 
 
@@ -179,15 +178,18 @@ def test_4_memory_safety():
 
 def test_5_password_change_integration(temp_db):
      # Password Change Integration Test
-    #  Инициализация и создание хранилища с паролем "A"
+     #  Инициализация и создание хранилища с паролем "A"
+     # Проверь, чтобы все эти строки были выровнены по одной линии (4 пробела от края)
     km = KeyManager(temp_db)
-    password_a = "PasswordA_Secure123"
+    password_a = "V3ry_Str0ng_P@ssword_123!"  # Используем сложный пароль
     km.setup_new_user(password_a)
 
-    # Добавление 10 записей получаем ключ шифрования для пароля A
-
+     # Вот эта строка 192, где была ошибка. Теперь она ровно под верхней.
     assert km.verify_and_unlock(password_a), "Не удалось разблокировать с паролем A"
     key_a = km.get_encryption_key()
+     # Добавление 10 записей получаем ключ шифрования для пароля A
+
+    
     fernet_a = Fernet(base64.urlsafe_b64encode(key_a))
 
     test_data = []

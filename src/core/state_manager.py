@@ -11,6 +11,10 @@ class StateManager:
         # Таймер бездействия (заглушка для Спринта 7)
         self.last_activity = time.time()
 
+        # ДЛЯ ЭКСПОНЕНЦИАЛЬНОЙ ЗАДЕРЖКИ (AUTH-3)
+        self.failed_attempts = 0
+        self.last_failed_time = 0
+
         # Таймер буфера обмена (заглушка для Спринта 4)
         self.clipboard_content = None
         self.clipboard_timer = 0
@@ -18,6 +22,25 @@ class StateManager:
         # Подписываемся на события для обновления состояния
         event_bus.subscribe(EventType.USER_LOGGED_IN, self._on_login)
         event_bus.subscribe(EventType.USER_LOGGED_OUT, self._on_logout)
+
+    def get_login_delay(self) -> int:
+        """Возвращает задержку в секундах для экспоненциального backoff (AUTH-3)"""
+        if self.failed_attempts <= 2:
+            return 1
+        elif self.failed_attempts <= 4:
+            return 5
+        else:
+            return 30
+
+    def record_failed_attempt(self):
+        """Фиксирует неудачную попытку входа"""
+        self.failed_attempts += 1
+        self.last_failed_time = time.time()
+        print(f"[STATE] Неудачная попытка #{self.failed_attempts}")
+
+    def reset_failed_attempts(self):
+        """Сбрасывает счётчик после успешного входа"""
+        self.failed_attempts = 0
 
     def lock_app(self):
         """Блокировка приложения"""

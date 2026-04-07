@@ -1,5 +1,6 @@
 import sys
 import time
+import traceback
 from PyQt6.QtGui import QAction
 
 from src.database.db import DatabaseHelper
@@ -11,11 +12,11 @@ from PyQt6.QtCore import Qt, QTimer, QEvent, QObject, pyqtSignal, QThread
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox,
                              QTableWidget, QApplication, QTableWidgetItem, QHeaderView,
                              QMenuBar, QMenu, QStatusBar, QToolBar, QLabel,
-                             QProgressDialog) # <--- Добавь это имя сюда
+                             QProgressDialog) 
 
 from src.core.crypto.key_manager import KeyManager
 from src.core.crypto.authentication import AuthenticationService
-from src.core.crypto.encryption_service import EncryptionService
+from src.core.vault.encryption_service import EncryptionService
 
 
 
@@ -48,14 +49,14 @@ class MainWindow(QMainWindow):
         self.current_master_password = None
 
         # таймер
-        self.clipboard_timer = QTimer()  # <--- Создаем таймер здесь
+        self.clipboard_timer = QTimer()
         self.clipboard_timer.timeout.connect(self.update_timer_label)
         self.remaining_time = 0
 
         # кр
         self.key_manager = KeyManager(self.db_helper)
         self.auth_service = AuthenticationService(self.key_manager, self.db_helper, timeout_seconds=3600)
-
+        self.encryption_service = EncryptionService(self.key_manager)
         # Подключение сигналов
         self.auth_service.UserLoggedIn.connect(self.on_user_logged_in)
         self.auth_service.UserLoggedOut.connect(self.on_user_logged_out)
@@ -103,6 +104,18 @@ class MainWindow(QMainWindow):
 
     def on_user_logged_in(self):
         print("Событие: UserLoggedIn")
+        # Проверяем, что ключи загружены
+        auth_key = self.key_manager.get_auth_key()
+        enc_key = self.key_manager.get_encryption_key()
+
+        print(f"Auth key present: {auth_key is not None}")
+        print(f"Encryption key present: {enc_key is not None}")
+
+        if enc_key is None:
+            print("ОШИБКА: Ключ шифрования не загружен после входа!")
+            QMessageBox.critical(self, "Ошибка", "Не удалось загрузить ключи шифрования")
+            return
+
         self.load_data_from_db()
 
         # показ главного окна
@@ -256,15 +269,24 @@ class MainWindow(QMainWindow):
 
     def verify_login(self, password):
         #Вызывается при попытке входа
-        #Скрываем окно на время проверки
         self.hide()
+
+        print(" ДИАГНОСТИКА ВХОДА")
+        print(f"Пароль получен, длина: {len(password)}")
+
+        # Проверяем наличие хеша
+        stored_hash = self.db_helper.get_setting("master_hash")
+        print(f"Хеш в БД: {stored_hash is not None}")
+        if stored_hash:
+            print(f"Хеш (первые 50 символов): {stored_hash[:50]}...")
 
         success = self.auth_service.login(password)
 
         if success:
+            print("Вход успешен!")
             self.login_win.accept()
         else:
-            # Формируем сообщение об ошибке
+            print("Вход не удался!")
             attempts = self.auth_service._failed_attempts
             msg = "Неверный мастер-пароль!"
             if attempts < 5:
@@ -306,20 +328,19 @@ class MainWindow(QMainWindow):
     def handle_save(self, service, login, password, notes):
         try:
             # шифрование пароля перед сохранением
-            from src.core.crypto.encryption_service import EncryptionService
-            enc_svc = EncryptionService(self.key_manager)
-            encrypted_password = enc_svc.encrypt(password)
+            encrypted_password = self.encryption_service.encrypt(password)
 
             # сохранение шифрованного пароля в базе
             self.db_helper.add_entry(service, login, encrypted_password, notes)
 
             self.table.add_record(service, login, password, notes, self.copy_to_clipboard)
 
-            # обновлене статуса
+            # обновление статуса
             self.statusBar().showMessage(f"Запись {service} добавлена", 5000)
 
         except Exception as e:
             print(f"Ошибка при сохранении: {e}")
+            traceback.print_exc()  # ДОБАВИТЬ ЭТУ СТРОКУ
             QMessageBox.critical(self, "Ошибка БД", f"Не удалось сохранить: {e}")
 
     def load_data_from_db(self):
@@ -333,8 +354,13 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("База данных пуста", 5000)
                 return
 
-            from src.core.crypto.encryption_service import EncryptionService
-            encryption_svc = EncryptionService(self.key_manager)
+            enc_key = self.key_manager.get_encryption_key()
+            if enc_key is None:
+                print("ОШИБКА: Ключ шифрования отсутствует в памяти!")
+                self.statusBar().showMessage("Ошибка: ключ шифрования не найден", 5000)
+                return
+
+            print(f"Найдено записей: {len(records)}")  # ДОБАВИТЬ ЭТУ СТРОКУ
 
             for rec in records:
                 service_name = rec.get('service', 'Unknown')
@@ -343,14 +369,16 @@ class MainWindow(QMainWindow):
                 notes = rec.get('notes', '')
 
                 try:
-                    # Если пароль не пустой, пытаемся расшифровать
                     if enc_password:
-                        decrypted_password = encryption_svc.decrypt(enc_password)
+                        print(f"Расшифровка пароля для {service_name}")  # ДОБАВИТЬ
+                        decrypted_password = self.encryption_service.decrypt(enc_password)
+                        print(f"Успешно расшифровано для {service_name}")  # ДОБАВИТЬ
                     else:
                         decrypted_password = ""
                 except Exception as e:
                     print(f"Ошибка расшифровки пароля для {service_name}: {e}")
-                    decrypted_password = "ОШИБКА"  # Или оставляем шифротекст
+                    traceback.print_exc()  # ДОБАВИТЬ ЭТУ СТРОКУ
+                    decrypted_password = "ОШИБКА"
 
                 self.table.add_record(
                     service_name,
@@ -364,7 +392,9 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             print(f"Критическая ошибка при загрузке данных: {e}")
+            traceback.print_exc()  # ДОБАВИТЬ ЭТУ СТРОКУ
             self.statusBar().showMessage("Ошибка загрузки данных из БД")
+
 
     def load_data(self):
         #Запуск процесса загрузки в фоновом потоке
@@ -372,7 +402,7 @@ class MainWindow(QMainWindow):
 
         # создание поток
         self.loading_thread = QThread()
-        self.worker = LoadDataWorker(self.db)
+        self.worker = LoadDataWorker(self.db_helper) 
         self.worker.moveToThread(self.loading_thread)
 
         # соединяем сигналы
@@ -504,6 +534,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "Успех", "Аккаунт создан! Вы вошли в систему.")
         except Exception as e:
             print(f"Ошибка при завершении настройки: {e}")
+            traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось завершить настройку: {e}")
 
 

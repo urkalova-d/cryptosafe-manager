@@ -2,10 +2,12 @@ import os
 import secrets
 import json
 import base64
+import re
 from argon2 import PasswordHasher, Type
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 
 class KeyDerivationService:
@@ -13,15 +15,15 @@ class KeyDerivationService:
         if config is None:
             config = {}
 
-            #  параметры Argon2id
-        self.time_cost = config.get('argon2_time', 3)
-        self.memory_cost = config.get('argon2_memory', 65536)  # 64 MiB
-        self.parallelism = config.get('argon2_parallelism', 4)
+        # параметры Argon2id
+        self.argon2_time = config.get('argon2_time', 3)
+        self.argon2_memory = config.get('argon2_memory', 65536)  # 64 MiB
+        self.argon2_parallelism = config.get('argon2_parallelism', 4)
 
         self.argon2_hasher = PasswordHasher(
-            time_cost=self.time_cost,
-            memory_cost=self.memory_cost,
-            parallelism=self.parallelism,
+            time_cost=self.argon2_time,
+            memory_cost=self.argon2_memory,
+            parallelism=self.argon2_parallelism,
             hash_len=32,
             salt_len=16,
             type=Type.ID
@@ -29,16 +31,12 @@ class KeyDerivationService:
 
         self.pbkdf2_iterations = config.get('pbkdf2_iterations', 100000)
 
-    def create_auth_hash(self, password: str) -> str:#argon2
-        # Возвращаем строку хеша
+    def create_auth_hash(self, password: str) -> str:
+        """Создание хеша пароля через Argon2id"""
         return self.argon2_hasher.hash(password)
 
     def derive_encryption_key(self, password: str, salt: bytes) -> bytes:
-        # PBKDF2
-        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-        from cryptography.hazmat.primitives import hashes
-        from cryptography.hazmat.backends import default_backend
-
+        """Генерация ключа шифрования через PBKDF2"""
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
@@ -48,27 +46,30 @@ class KeyDerivationService:
         )
         return kdf.derive(password.encode())
 
+    def derive_auth_key(self, password: str, salt: bytes) -> bytes:
+        """Генерация ключа аутентификации через Argon2id (ДОБАВЛЕНО)"""
+        from argon2.low_level import hash_secret_raw
+
+        # Используем низкоуровневый API Argon2 для получения сырых байтов
+        raw_hash = hash_secret_raw(
+            secret=password.encode('utf-8'),
+            salt=salt,
+            time_cost=self.argon2_time,
+            memory_cost=self.argon2_memory,
+            parallelism=self.argon2_parallelism,
+            hash_len=32,
+            type=Type.ID
+        )
+        return raw_hash
+
     def generate_auth_key(self, password: str, salt: bytes) -> bytes:
-        #генерация ключа аутентификации через argon2
-        # пароль+соль
-        combined_secret = password + salt.hex()
-        dummy_hash = self.argon2_hasher.hash(combined_secret)
-
-        # Извлекаем байты хеша
-        parts = dummy_hash.split('$')
-        key_b64 = parts[-1]
-
-        # Декодируем Base64
-        padding = len(key_b64) % 4
-        if padding:
-            key_b64 += '=' * (4 - padding)
-
-        return base64.urlsafe_b64decode(key_b64)
+        """Алиас для derive_auth_key (для обратной совместимости)"""
+        return self.derive_auth_key(password, salt)
 
     def derive_special_key(self, master_key: bytes, purpose: str, salt: bytes = None) -> bytes:
-        #генерация специализированных ключей на основе мастер ключ
+        """Генерация специализированных ключей на основе мастер-ключа"""
         if salt is None:
-            #  фиксированная соль в рамках сессии
+            # фиксированная соль в рамках сессии
             salt = b'cryptosafe_special_salt_v1'
 
         hkdf = HKDF(
@@ -80,18 +81,18 @@ class KeyDerivationService:
         )
         return hkdf.derive(master_key)
 
-
     def verify_password(self, password: str, stored_hash: str) -> bool:
+        """Проверка пароля через Argon2id"""
         try:
             return self.argon2_hasher.verify(stored_hash, password)
         except Exception:
-            #  Проверка в режиме постоянного времени для предотвращения атак по времени
+            # Проверка в режиме постоянного времени для предотвращения атак по времени
             secrets.compare_digest(b'dummy', b'dummy')
             return False
 
     @staticmethod
     def validate_password_strength(password: str) -> tuple[bool, str]:
-        import re
+        """Валидация сложности пароля"""
         if len(password) < 12:
             return False, "Пароль должен быть не менее 12 символов."
         if not re.search(r"[a-z]", password):
