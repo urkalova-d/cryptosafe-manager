@@ -8,14 +8,10 @@ class EntryManager:
         self.generator = PasswordGenerator()
 
     def add_entry(self, service, username, password, notes):
-        """Добавление записи с шифрованием пароля."""
+        #Добавление записи с шифрованием пароля
         encrypted_pass = self.encryption.encrypt(password)
         return self.db.add_entry(service, username, encrypted_pass, notes)
 
     def get_all_entries(self):
-        """Получение всех записей (пароли расшифровываются)."""
-        # Примечание: Массовая расшифровка может быть медленной.
-        # Лучше расшифровывать по требованию, но для удобства GUI сделаем здесь.
-        # В идеале этот метод должен возвращать "маскированные" данные,
-        # а расшифровку делать по клику. Пока оставим заглушку.
+        #Получение всех записей (пароли расшифровываются)
         return self.db.get_all_entries()

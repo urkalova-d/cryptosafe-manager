@@ -313,88 +313,86 @@ class MainWindow(QMainWindow):
 
     def open_add_window(self):
         try:
+            # Убедимся, что импорт актуален
             from src.gui.add_record_window import AddRecordWindow
             self.add_win = AddRecordWindow(self)
 
-            # подключение сигнала к обработчику
             self.add_win.record_saved.connect(self.handle_save)
 
-            # Используем exec() для модального окна (блокирует основное окно)
             self.add_win.exec()
-
         except Exception as e:
             print(f"Критическая ошибка при открытии окна: {e}")
+            traceback.print_exc()
 
-    def handle_save(self, service, login, password, notes):
+
+    def handle_save(self, service, login, password, url, notes):
         try:
-            # шифрование пароля перед сохранением
-            encrypted_password = self.encryption_service.encrypt(password)
+            # 1подготовка данных
+            entry_data = {
+                'service': service,
+                'username': login,
+                'password': password,
+                'url': url,
+                'notes': notes
+            }
 
-            # сохранение шифрованного пароля в базе
-            self.db_helper.add_entry(service, login, encrypted_password, notes)
+            # 2шифрование всей записи (AES-GCM JSON Blob)
+            encrypted_blob = self.encryption_service.encrypt_entry(entry_data)
 
+            # 3сохранение в БД
+            self.db_helper.add_entry(encrypted_blob)
+
+            # 4обновление таблицы
             self.table.add_record(service, login, password, notes, self.copy_to_clipboard)
-
-            # обновление статуса
             self.statusBar().showMessage(f"Запись {service} добавлена", 5000)
 
         except Exception as e:
             print(f"Ошибка при сохранении: {e}")
-            traceback.print_exc()  # ДОБАВИТЬ ЭТУ СТРОКУ
+            traceback.print_exc()
             QMessageBox.critical(self, "Ошибка БД", f"Не удалось сохранить: {e}")
 
     def load_data_from_db(self):
         try:
-            # очистка таблицы перед загрузкой
             self.table.setRowCount(0)
 
+            # Получение списка BLOB-ов из БД
             records = self.db_helper.get_all_entries()
-
             if not records:
                 self.statusBar().showMessage("База данных пуста", 5000)
                 return
 
-            enc_key = self.key_manager.get_encryption_key()
-            if enc_key is None:
-                print("ОШИБКА: Ключ шифрования отсутствует в памяти!")
-                self.statusBar().showMessage("Ошибка: ключ шифрования не найден", 5000)
+            if not self.key_manager.get_encryption_key():
                 return
 
-            print(f"Найдено записей: {len(records)}")  # ДОБАВИТЬ ЭТУ СТРОКУ
-
             for rec in records:
-                service_name = rec.get('service', 'Unknown')
-                username = rec.get('username', '')
-                enc_password = rec.get('encrypted_password', '')
-                notes = rec.get('notes', '')
+                enc_blob = rec.get('encrypted_data')
 
                 try:
-                    if enc_password:
-                        print(f"Расшифровка пароля для {service_name}")  # ДОБАВИТЬ
-                        decrypted_password = self.encryption_service.decrypt(enc_password)
-                        print(f"Успешно расшифровано для {service_name}")  # ДОБАВИТЬ
-                    else:
-                        decrypted_password = ""
-                except Exception as e:
-                    print(f"Ошибка расшифровки пароля для {service_name}: {e}")
-                    traceback.print_exc()  # ДОБАВИТЬ ЭТУ СТРОКУ
-                    decrypted_password = "ОШИБКА"
+                    # Расшифровка JSON
+                    data = self.encryption_service.decrypt_entry(enc_blob)
 
-                self.table.add_record(
-                    service_name,
-                    username,
-                    decrypted_password,
-                    notes,
-                    self.copy_to_clipboard
-                )
+                    # Извлечение поля
+                    service_name = data.get('title', 'Unknown')
+                    username = data.get('username', '')
+                    password = data.get('password', '')
+                    notes = data.get('notes', '')
+
+                    self.table.add_record(
+                        service_name, username, password, notes, self.copy_to_clipboard
+                    )
+                except ValueError as ve:
+                    # Ошибка целостности (Invalid Tag)
+                    self.table.add_record("ОШИБКА ЦЕЛОСТНОСТИ", "", "", str(ve), None)
+                except Exception as e:
+                    print(f"Ошибка обработки записи: {e}")
+                    traceback.print_exc()
 
             self.statusBar().showMessage(f"Загружено записей: {len(records)}", 5000)
 
         except Exception as e:
             print(f"Критическая ошибка при загрузке данных: {e}")
-            traceback.print_exc()  # ДОБАВИТЬ ЭТУ СТРОКУ
+            traceback.print_exc()
             self.statusBar().showMessage("Ошибка загрузки данных из БД")
-
 
     def load_data(self):
         #Запуск процесса загрузки в фоновом потоке

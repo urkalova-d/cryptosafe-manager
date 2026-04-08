@@ -19,14 +19,11 @@ class DatabaseHelper:
     def init_db(self):
         with self._lock:
             cursor = self.conn.cursor()
-            # таблица для записей
+            # таблица для записей (хранится только ID и зашифрованный BLOB)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS vault_entries (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    service TEXT NOT NULL,
-                    username TEXT,
-                    encrypted_password TEXT NOT NULL,
-                    notes TEXT
+                    encrypted_data BLOB NOT NULL
                 )
             """)
             # таблица для настроек мастер пароля, соли и тд
@@ -122,40 +119,42 @@ class DatabaseHelper:
         input_hash = hashlib.sha256(derived_key).hexdigest()
         return input_hash == stored_hash
 
-    def add_entry(self, service, username, encrypted_password, notes=""):
+    def add_entry(self, encrypted_data: bytes):
+        #Сохраняет зашифрованный JSON-блоб
         with self._lock:
             cursor = self.conn.cursor()
-            cursor.execute("""
-                INSERT INTO vault_entries (service, username, encrypted_password, notes)
-                VALUES (?, ?, ?, ?)
-            """, (service, username, encrypted_password, notes))
+            cursor.execute("INSERT INTO vault_entries (encrypted_data) VALUES (?)", (encrypted_data,))
             self.conn.commit()
             return cursor.lastrowid
 
     def get_all_entries(self):
+        #Возвращает список словарей с id и зашифрованными данными
         with self._lock:
             cursor = self.conn.cursor()
-            cursor.execute("SELECT * FROM vault_entries")
-            return [dict(row) for row in cursor.fetchall()]
+            cursor.execute("SELECT id, encrypted_data FROM vault_entries")
+            # Возвращаем bytes, а не str
+            return [{'id': row['id'], 'encrypted_data': row['encrypted_data']} for row in cursor.fetchall()]
 
-    def close(self):
-        #закрывает соединение с базой
-        if hasattr(self, 'conn') and self.conn:
-            self.conn.close()
+    def update_entry(self, entry_id: int, encrypted_data: bytes):
+       #Обновление записи
+        with self._lock:
+            self.conn.execute("UPDATE vault_entries SET encrypted_data = ? WHERE id = ?", (encrypted_data, entry_id))
+            self.conn.commit()
 
+    def delete_entry(self, entry_id: int):
+        #Удаление записи
+        with self._lock:
+            self.conn.execute("DELETE FROM vault_entries WHERE id = ?", (entry_id,))
+            self.conn.commit()
 
     def rotate_vault_keys(self, new_master_hash, new_auth_salt, new_enc_salt, re_encrypted_data):
-        # Атомарное обновление хеша, солей и перешифрованных паролей.
-
         with self._lock:
             try:
                 self.conn.execute("BEGIN TRANSACTION")
 
-                # обновление мастре хеша
                 self.conn.execute("INSERT OR REPLACE INTO settings (setting_key, setting_value) VALUES (?, ?)",
                                   ("master_hash", new_master_hash))
 
-                # обновление соли
                 self.conn.execute("""
                     INSERT OR REPLACE INTO key_store (key_type, key_data, version, created_at)
                     VALUES (?, ?, 1, datetime('now'))
@@ -166,20 +165,23 @@ class DatabaseHelper:
                     VALUES (?, ?, 1, datetime('now'))
                 """, ("encryption_salt", new_enc_salt.hex()))
 
-                # обновление записи паролей
-                for entry_id, new_password_enc in re_encrypted_data:
+                # Обновляем BLOB-ы
+                for entry_id, new_blob in re_encrypted_data:
                     self.conn.execute(
-                        "UPDATE vault_entries SET encrypted_password = ? WHERE id = ?",
-                        (new_password_enc, entry_id)
+                        "UPDATE vault_entries SET encrypted_data = ? WHERE id = ?",
+                        (new_blob, entry_id)
                     )
 
                 self.conn.commit()
                 return True
             except Exception as e:
                 self.conn.rollback()
-                print(f"Ошибка при ротации в БД (произведен откат): {e}")
+                print(f"Ошибка при ротации в БД: {e}")
                 raise e
 
+    def close(self):
+        if hasattr(self, 'conn') and self.conn:
+            self.conn.close()
 
 # Глобальный экземпляр для приложения
 db_manager = DatabaseHelper(db_path="vault.db")

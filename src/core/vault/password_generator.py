@@ -4,9 +4,7 @@ import secrets
 class PasswordGenerator:
     @staticmethod
     def generate(length=20, use_upper=True, use_lower=True, use_digits=True, use_special=True):
-        """
-        Генерация криптостойкого пароля с использованием secrets (CSPRNG).
-        """
+        #генерация криптостойкого пароля с использованием secrets (CSPRNG)
         characters = ""
         if use_upper:
             characters += string.ascii_uppercase
@@ -20,6 +18,6 @@ class PasswordGenerator:
         if not characters:
             raise ValueError("Должен быть выбран хотя бы один набор символов")
 
-        # Генерация безопасного пароля
+        # генерация безопасного пароля
         password = ''.join(secrets.choice(characters) for _ in range(length))
         return password

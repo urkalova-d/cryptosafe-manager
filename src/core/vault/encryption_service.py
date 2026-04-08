@@ -1,47 +1,93 @@
 import os
+import json
 import base64
+import time
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.backends import default_backend
-
+from cryptography.exceptions import InvalidTag
 
 class EncryptionService:
     def __init__(self, key_manager):
         self.key_manager = key_manager
 
     def _get_aes_key(self):
-        """
-        Получает сырой ключ из KeyManager.
-        Примечание: KeyManager хранит ключ, полученный через PBKDF2.
-        Для AES-GCM ключ должен быть 32 байтами (256 бит).
-        """
+        #Получает сырой ключ из KeyManager
         key = self.key_manager.get_encryption_key()
         if not key:
             raise PermissionError("Хранилище заблокировано. Ключ недоступен.")
 
-        # Если ключ уже 32 байта, используем как есть.
-        # Если ключ был получен через Fernet (urlsafe_b64decode), он может быть длиннее,
-        # но в нашей текущей реализации KeyManager.derive_encryption_key возвращает ровно 32 байта.
         if len(key) == 32:
             return key
         else:
-            # Если длина отличается (маловероятно при текущем KDF), деривируем через HKDF
+            # Если длина отличается , деривируем через HKDF
             hkdf = HKDF(
                 algorithm=hashes.SHA256(),
                 length=32,
-                salt=None,  # Salt можно не использовать, так как ключ уже выведен из соленого пароля
-                info=b'aes-gcm-key-derivation',
+                salt=None,
+                info=b'aes-gcm-vault-key',
                 backend=default_backend()
             )
             return hkdf.derive(key)
 
+    def encrypt_entry(self, entry_data: dict) -> bytes:
+        #Упаковывает данные записи в JSON, добавляет метаданные и шифрует AES-256-GCM
+
+        # 1. Подготовка JSON полезной нагрузки
+        payload = {
+            "version": 1,  # Версия формата
+            "created_at": int(time.time()),  # Timestamp
+            "title": entry_data.get('service', ''),
+            "username": entry_data.get('username', ''),
+            "password": entry_data.get('password', ''),
+            "url": entry_data.get('url', ''),
+            "notes": entry_data.get('notes', '')
+        }
+
+        json_str = json.dumps(payload, ensure_ascii=False)
+        plaintext = json_str.encode('utf-8')
+
+        # 2. Шифрование
+        key = self._get_aes_key()
+        aesgcm = AESGCM(key)
+
+        nonce = os.urandom(12)  # Уникальный nonce для каждой записи
+
+        ciphertext = aesgcm.encrypt(nonce, plaintext, None)
+
+        # Возвращаем raw bytes (nonce + ciphertext)
+        return nonce + ciphertext
+
+    def decrypt_entry(self, encrypted_data: bytes) -> dict:
+        #Расшифровывает BLOB из БД и возвращает словарь
+        if not encrypted_data:
+            return {}
+
+        try:
+            key = self._get_aes_key()
+            aesgcm = AESGCM(key)
+
+            # Разбираем структуру
+            nonce = encrypted_data[:12]
+            ciphertext = encrypted_data[12:]
+
+            # Расшифровка
+            plaintext = aesgcm.decrypt(nonce, ciphertext, None)
+
+            # Парсим JSON
+            return json.loads(plaintext.decode('utf-8'))
+
+        except InvalidTag:
+            #  Обработка tampering
+            print("КРИТИЧЕСКАЯ ОШИБКА: Данные были изменены или ключ неверен!")
+            raise ValueError("Ошибка целостности данных: Invalid Authentication Tag")
+        except Exception as e:
+            print(f"Ошибка расшифровки: {e}")
+            raise
+
     def encrypt(self, plaintext: str) -> str:
-        """
-        Шифрует строку с использованием AES-256-GCM.
-        Генерирует уникальный Nonce (IV) для каждого шифрования.
-        Формат возвращаемой строки: base64(nonce || ciphertext)
-        """
+        #Шифрует строку с использованием AES-256-GCM
         if not plaintext:
             return ""
 
@@ -59,9 +105,8 @@ class EncryptionService:
         return base64.urlsafe_b64encode(combined).decode('utf-8')
 
     def decrypt(self, encrypted_data: str) -> str:
-        """
-        Расшифровывает строку, зашифрованную методом encrypt.
-        """
+        #Расшифровывает строку, зашифрованную методом encrypt
+
         if not encrypted_data:
             return ""
 
