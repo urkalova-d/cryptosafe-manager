@@ -317,7 +317,9 @@ class MainWindow(QMainWindow):
             from src.gui.add_record_window import AddRecordWindow
             self.add_win = AddRecordWindow(self)
 
-            self.add_win.record_saved.connect(self.handle_save)
+            self.add_win.record_saved.connect(
+                lambda s, l, p, u, c, n: self.handle_save(s, l, p, u, c, n)
+            )
 
             self.add_win.exec()
         except Exception as e:
@@ -325,12 +327,13 @@ class MainWindow(QMainWindow):
             traceback.print_exc()
 
 
-    def handle_save(self, service, login, password, url, notes):
+    def handle_save(self, service, login, password, url, category, notes):
         try:
             # 1подготовка данных
             entry_data = {
                 'service': service,
                 'username': login,
+                'category': category,
                 'password': password,
                 'url': url,
                 'notes': notes
@@ -343,7 +346,7 @@ class MainWindow(QMainWindow):
             self.db_helper.add_entry(encrypted_blob)
 
             # 4обновление таблицы
-            self.table.add_record(service, login, password, notes, self.copy_to_clipboard)
+            self.table.add_record(service, login, category, password, notes, self.copy_to_clipboard)
             self.statusBar().showMessage(f"Запись {service} добавлена", 5000)
 
         except Exception as e:
@@ -374,12 +377,12 @@ class MainWindow(QMainWindow):
                     # Извлечение поля
                     service_name = data.get('title', 'Unknown')
                     username = data.get('username', '')
+                    category = data.get('category', 'Uncategorized')
                     password = data.get('password', '')
                     notes = data.get('notes', '')
 
-                    self.table.add_record(
-                        service_name, username, password, notes, self.copy_to_clipboard
-                    )
+
+                    self.table.add_record(service_name, username, category, password, notes, self.copy_to_clipboard)
                 except ValueError as ve:
                     # Ошибка целостности (Invalid Tag)
                     self.table.add_record("ОШИБКА ЦЕЛОСТНОСТИ", "", "", str(ve), None)
@@ -422,6 +425,7 @@ class MainWindow(QMainWindow):
                 if isinstance(row, dict):
                     service = row.get('service', '')
                     login = row.get('username', row.get('login', ''))
+                    category = row.get('category', 'Uncategorized') if isinstance(row, dict) else "Uncategorized"
                     password = row.get('encrypted_password', row.get('password', ''))
                     notes = row.get('notes', '')
                 else:
@@ -430,7 +434,7 @@ class MainWindow(QMainWindow):
                     password = row[3]
                     notes = row[4] if len(row) > 4 else ""
 
-                self.table.add_record(service, login, password, notes, self.copy_to_clipboard)
+                self.table.add_record(service, login, category, password, notes, self.copy_to_clipboard)
 
             except Exception as e:
                 print(f"Ошибка при чтении строки: {e}")

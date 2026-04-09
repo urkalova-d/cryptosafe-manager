@@ -23,7 +23,10 @@ class DatabaseHelper:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS vault_entries (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    encrypted_data BLOB NOT NULL
+                    encrypted_data BLOB NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    tags TEXT
                 )
             """)
             # таблица для настроек мастер пароля, соли и тд
@@ -119,58 +122,66 @@ class DatabaseHelper:
         input_hash = hashlib.sha256(derived_key).hexdigest()
         return input_hash == stored_hash
 
-    def add_entry(self, encrypted_data: bytes):
-        #Сохраняет зашифрованный JSON-блоб
+    def add_entry(self, encrypted_data: bytes, tags: str = ""):
+        """Сохраняет зашифрованный JSON-блоб и метаданные."""
         with self._lock:
             cursor = self.conn.cursor()
-            cursor.execute("INSERT INTO vault_entries (encrypted_data) VALUES (?)", (encrypted_data,))
+            cursor.execute("""
+                INSERT INTO vault_entries (encrypted_data, tags, created_at, updated_at)
+                VALUES (?, ?, datetime('now'), datetime('now'))
+            """, (encrypted_data, tags))
             self.conn.commit()
             return cursor.lastrowid
 
     def get_all_entries(self):
-        #Возвращает список словарей с id и зашифрованными данными
+        """Возвращает список словарей с id, зашифрованными данными и метаданными."""
         with self._lock:
             cursor = self.conn.cursor()
-            cursor.execute("SELECT id, encrypted_data FROM vault_entries")
-            # Возвращаем bytes, а не str
-            return [{'id': row['id'], 'encrypted_data': row['encrypted_data']} for row in cursor.fetchall()]
+            cursor.execute("SELECT id, encrypted_data, created_at, updated_at, tags FROM vault_entries")
+            return [dict(row) for row in cursor.fetchall()]
 
-    def update_entry(self, entry_id: int, encrypted_data: bytes):
-       #Обновление записи
+    def update_entry(self, entry_id: int, encrypted_data: bytes, tags: str = None):
+        """Обновление записи."""
         with self._lock:
-            self.conn.execute("UPDATE vault_entries SET encrypted_data = ? WHERE id = ?", (encrypted_data, entry_id))
+            if tags is not None:
+                self.conn.execute("UPDATE vault_entries SET encrypted_data = ?, tags = ?, updated_at = datetime('now') WHERE id = ?",
+                                  (encrypted_data, tags, entry_id))
+            else:
+                self.conn.execute("UPDATE vault_entries SET encrypted_data = ?, updated_at = datetime('now') WHERE id = ?",
+                                  (encrypted_data, entry_id))
             self.conn.commit()
 
     def delete_entry(self, entry_id: int):
-        #Удаление записи
+        """Удаление записи."""
         with self._lock:
             self.conn.execute("DELETE FROM vault_entries WHERE id = ?", (entry_id,))
             self.conn.commit()
 
     def rotate_vault_keys(self, new_master_hash, new_auth_salt, new_enc_salt, re_encrypted_data):
+        """Атомарное обновление при смене пароля."""
         with self._lock:
             try:
                 self.conn.execute("BEGIN TRANSACTION")
 
                 self.conn.execute("INSERT OR REPLACE INTO settings (setting_key, setting_value) VALUES (?, ?)",
-                                  ("master_hash", new_master_hash))
+                                      ("master_hash", new_master_hash))
 
                 self.conn.execute("""
-                    INSERT OR REPLACE INTO key_store (key_type, key_data, version, created_at)
-                    VALUES (?, ?, 1, datetime('now'))
-                """, ("auth_salt", new_auth_salt.hex()))
+                        INSERT OR REPLACE INTO key_store (key_type, key_data, version, created_at)
+                        VALUES (?, ?, 1, datetime('now'))
+                    """, ("auth_salt", new_auth_salt.hex()))
 
                 self.conn.execute("""
-                    INSERT OR REPLACE INTO key_store (key_type, key_data, version, created_at)
-                    VALUES (?, ?, 1, datetime('now'))
-                """, ("encryption_salt", new_enc_salt.hex()))
+                        INSERT OR REPLACE INTO key_store (key_type, key_data, version, created_at)
+                        VALUES (?, ?, 1, datetime('now'))
+                    """, ("encryption_salt", new_enc_salt.hex()))
 
                 # Обновляем BLOB-ы
                 for entry_id, new_blob in re_encrypted_data:
                     self.conn.execute(
-                        "UPDATE vault_entries SET encrypted_data = ? WHERE id = ?",
-                        (new_blob, entry_id)
-                    )
+                            "UPDATE vault_entries SET encrypted_data = ? WHERE id = ?",
+                            (new_blob, entry_id)
+                        )
 
                 self.conn.commit()
                 return True
@@ -179,9 +190,8 @@ class DatabaseHelper:
                 print(f"Ошибка при ротации в БД: {e}")
                 raise e
 
-    def close(self):
-        if hasattr(self, 'conn') and self.conn:
-            self.conn.close()
+        def close(self):
+            if hasattr(self, 'conn') and self.conn:
+                self.conn.close()
 
-# Глобальный экземпляр для приложения
 db_manager = DatabaseHelper(db_path="vault.db")

@@ -42,6 +42,7 @@ class EncryptionService:
             "username": entry_data.get('username', ''),
             "password": entry_data.get('password', ''),
             "url": entry_data.get('url', ''),
+            "category": entry_data.get('category', 'Uncategorized'),
             "notes": entry_data.get('notes', '')
         }
 

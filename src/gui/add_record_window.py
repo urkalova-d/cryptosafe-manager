@@ -1,12 +1,12 @@
 from PyQt6.QtWidgets import (QDialog, QFormLayout, QLineEdit, QPushButton,
-                             QVBoxLayout, QHBoxLayout, QMessageBox)
+                             QVBoxLayout, QHBoxLayout, QMessageBox, QComboBox)
 from PyQt6.QtCore import pyqtSignal
 
 from src.core.vault.password_generator import PasswordGenerator
 
 
 class AddRecordWindow(QDialog):
-    record_saved = pyqtSignal(str, str, str, str, str)
+    record_saved = pyqtSignal(str, str, str, str, str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -24,9 +24,15 @@ class AddRecordWindow(QDialog):
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.notes = QLineEdit()
 
+        # Выбор категории (Requirement 3.2)
+        self.category = QComboBox()
+        self.category.addItems(["Uncategorized", "Work", "Personal", "Finance", "Social", "Development"])
+        self.category.setEditable(True)  # Разрешаем ввод своей категории
+
         form.addRow("Сервис:", self.service)
         form.addRow("Логин:", self.login)
         form.addRow("URL:", self.url)
+        form.addRow("Категория:", self.category)
         form.addRow("Пароль:", self.password)
         form.addRow("Заметки:", self.notes)
 
@@ -65,6 +71,7 @@ class AddRecordWindow(QDialog):
             self.login.text(),
             self.password.text(),
             self.url.text(),
+            self.category.currentText(),
             self.notes.text()
         )
         self.accept()
