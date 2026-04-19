@@ -29,6 +29,16 @@ class DatabaseHelper:
                     tags TEXT
                 )
             """)
+            # НОВАЯ ТАБЛИЦА: Корзина (Soft Delete - CRUD-4)
+            cursor.execute("""
+                            CREATE TABLE IF NOT EXISTS deleted_entries (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                encrypted_data BLOB NOT NULL,
+                                original_created_at TIMESTAMP,
+                                deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                expiration_timestamp TIMESTAMP
+                            )
+                        """)
             # таблица для настроек мастер пароля, соли и тд
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS settings (
@@ -125,13 +135,27 @@ class DatabaseHelper:
     def add_entry(self, encrypted_data: bytes, tags: str = ""):
         """Сохраняет зашифрованный JSON-блоб и метаданные."""
         with self._lock:
+            try:
+                self.conn.execute("BEGIN TRANSACTION")
+                cursor = self.conn.cursor()
+                cursor.execute("""
+                    INSERT INTO vault_entries (encrypted_data, tags, created_at, updated_at)
+                    VALUES (?, ?, datetime('now'), datetime('now'))
+                """, (encrypted_data, tags))
+                entry_id = cursor.lastrowid
+                self.conn.commit()
+                return entry_id
+            except Exception as e:
+                self.conn.rollback()
+                raise e
+
+    def get_entry(self, entry_id: int):
+        with self._lock:
             cursor = self.conn.cursor()
-            cursor.execute("""
-                INSERT INTO vault_entries (encrypted_data, tags, created_at, updated_at)
-                VALUES (?, ?, datetime('now'), datetime('now'))
-            """, (encrypted_data, tags))
-            self.conn.commit()
-            return cursor.lastrowid
+            cursor.execute("SELECT id, encrypted_data, created_at, updated_at, tags FROM vault_entries WHERE id = ?",
+                           (entry_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
 
     def get_all_entries(self):
         """Возвращает список словарей с id, зашифрованными данными и метаданными."""
@@ -143,13 +167,23 @@ class DatabaseHelper:
     def update_entry(self, entry_id: int, encrypted_data: bytes, tags: str = None):
         """Обновление записи."""
         with self._lock:
-            if tags is not None:
-                self.conn.execute("UPDATE vault_entries SET encrypted_data = ?, tags = ?, updated_at = datetime('now') WHERE id = ?",
-                                  (encrypted_data, tags, entry_id))
-            else:
-                self.conn.execute("UPDATE vault_entries SET encrypted_data = ?, updated_at = datetime('now') WHERE id = ?",
-                                  (encrypted_data, entry_id))
-            self.conn.commit()
+            try:
+                if tags is not None:
+                    self.conn.execute(
+                        "UPDATE vault_entries SET encrypted_data = ?, tags = ?, updated_at = datetime('now') WHERE id = ?",
+                        (sqlite3.Binary(encrypted_data), tags, entry_id)
+                    )
+                else:
+                    self.conn.execute(
+                        "UPDATE vault_entries SET encrypted_data = ?, updated_at = datetime('now') WHERE id = ?",
+                        (sqlite3.Binary(encrypted_data), entry_id)
+                    )
+                self.conn.commit()
+                return True
+            except Exception as e:
+                self.conn.rollback()
+                print(f"Ошибка БД при обновлении: {e}")
+                return False
 
     def delete_entry(self, entry_id: int):
         """Удаление записи."""
@@ -190,8 +224,49 @@ class DatabaseHelper:
                 print(f"Ошибка при ротации в БД: {e}")
                 raise e
 
-        def close(self):
-            if hasattr(self, 'conn') and self.conn:
-                self.conn.close()
+    def soft_delete_entry(self, entry_id: int, expiration_days: int = 30):
+        """Перемещает запись в таблицу deleted_entries."""
+        with self._lock:
+            try:
+                self.conn.execute("BEGIN TRANSACTION")
+
+                # 1. Получаем данные записи
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT encrypted_data, created_at FROM vault_entries WHERE id = ?", (entry_id,))
+                row = cursor.fetchone()
+                if not row:
+                    raise ValueError("Entry not found")
+
+                enc_data = row['encrypted_data']
+                orig_created = row['created_at']
+
+                # 2. Вставляем в deleted_entries
+                # Вычисляем дату автоматического удаления
+                self.conn.execute("""
+                    INSERT INTO deleted_entries (id, encrypted_data, original_created_at, deleted_at, expiration_timestamp)
+                    VALUES (?, ?, ?, datetime('now'), datetime('now', '+' || ? || ' days'))
+                """, (entry_id, enc_data, orig_created, expiration_days))
+
+                # 3. Удаляем из основной таблицы
+                self.conn.execute("DELETE FROM vault_entries WHERE id = ?", (entry_id,))
+
+                self.conn.commit()
+                return True
+            except Exception as e:
+                self.conn.rollback()
+                print(f"Error during soft delete: {e}")
+                raise e
+
+    def hard_delete_entry(self, entry_id: int):
+        """Полное удаление из корзины."""
+        with self._lock:
+            self.conn.execute("DELETE FROM deleted_entries WHERE id = ?", (entry_id,))
+            self.conn.commit()
+
+    def close(self):
+        if hasattr(self, 'conn') and self.conn:
+            self.conn.close()
+
+
 
 db_manager = DatabaseHelper(db_path="vault.db")

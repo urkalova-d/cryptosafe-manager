@@ -53,8 +53,19 @@ class MainWindow(QMainWindow):
         self.clipboard_timer.timeout.connect(self.update_timer_label)
         self.remaining_time = 0
 
+
         # кр
         self.key_manager = KeyManager(self.db_helper)
+
+        # Инициализация менеджера записей
+        from src.core.vault.entry_manager import EntryManager
+        self.entry_manager = EntryManager(self.db_helper, self.key_manager)
+
+        # Подключение сигналов менеджера
+        self.entry_manager.EntryCreated.connect(self.on_entry_created)
+        self.entry_manager.EntryUpdated.connect(self.on_entry_updated)
+        self.entry_manager.EntryDeleted.connect(self.on_entry_deleted)
+
         self.auth_service = AuthenticationService(self.key_manager, self.db_helper, timeout_seconds=3600)
         self.encryption_service = EncryptionService(self.key_manager)
         # Подключение сигналов
@@ -73,6 +84,8 @@ class MainWindow(QMainWindow):
         self.hide()
         #проверка первого запуска
         QTimer.singleShot(100, self.check_first_run)
+
+
 
 
     def init_ui(self):
@@ -150,10 +163,16 @@ class MainWindow(QMainWindow):
 
         # редактирование
         edit_menu = menubar.addMenu("Редактирование")
+
         add_action = edit_menu.addAction("Добавить")
         add_action.triggered.connect(self.open_add_window)
-        edit_menu.addAction("Редактировать")
-        edit_menu.addAction("Удалить")
+
+        edit_action = edit_menu.addAction("Редактировать")
+        edit_action.triggered.connect(self.edit_selected_entry)
+
+        delete_action = edit_menu.addAction("Удалить")
+        delete_action.triggered.connect(self.delete_selected_entry)
+
         change_pwd_action = edit_menu.addAction("Сменить мастер-пароль")
         change_pwd_action.triggered.connect(self.open_password_change_dialog)
 
@@ -328,6 +347,7 @@ class MainWindow(QMainWindow):
 
 
     def handle_save(self, service, login, password, url, category, notes):
+        """Вызывается при сохранении из диалога"""
         try:
             # 1подготовка данных
             entry_data = {
@@ -338,15 +358,9 @@ class MainWindow(QMainWindow):
                 'url': url,
                 'notes': notes
             }
+            # Используем EntryManager вместо прямого шифрования
+            self.entry_manager.create_entry(entry_data)
 
-            # 2шифрование всей записи (AES-GCM JSON Blob)
-            encrypted_blob = self.encryption_service.encrypt_entry(entry_data)
-
-            # 3сохранение в БД
-            self.db_helper.add_entry(encrypted_blob)
-
-            # 4обновление таблицы
-            self.table.add_record(service, login, category, password, notes, self.copy_to_clipboard)
             self.statusBar().showMessage(f"Запись {service} добавлена", 5000)
 
         except Exception as e:
@@ -383,6 +397,9 @@ class MainWindow(QMainWindow):
 
 
                     self.table.add_record(service_name, username, category, password, notes, self.copy_to_clipboard)
+                    last_row = self.table.rowCount() - 1
+                    item = self.table.item(last_row, 0)
+                    item.setData(Qt.ItemDataRole.UserRole, rec['id'])
                 except ValueError as ve:
                     # Ошибка целостности (Invalid Tag)
                     self.table.add_record("ОШИБКА ЦЕЛОСТНОСТИ", "", "", str(ve), None)
@@ -396,6 +413,19 @@ class MainWindow(QMainWindow):
             print(f"Критическая ошибка при загрузке данных: {e}")
             traceback.print_exc()
             self.statusBar().showMessage("Ошибка загрузки данных из БД")
+
+    def on_entry_created(self, entry_id):
+        print(f"Событие: EntryCreated (ID: {entry_id})")
+        # Можно обновить только одну строку, но для простоты перезагрузим таблицу
+        self.load_data_from_db()
+
+    def on_entry_updated(self, entry_id):
+        print(f"Событие: EntryUpdated (ID: {entry_id})")
+        self.load_data_from_db()
+
+    def on_entry_deleted(self, entry_id):
+        print(f"Событие: EntryDeleted (ID: {entry_id})")
+        self.load_data_from_db()
 
     def load_data(self):
         #Запуск процесса загрузки в фоновом потоке
@@ -538,5 +568,81 @@ class MainWindow(QMainWindow):
             print(f"Ошибка при завершении настройки: {e}")
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось завершить настройку: {e}")
+
+    def delete_selected_entry(self):
+        """Удаление выбранной записи"""
+        # Получаем ID из скрытой колонки таблицы (обычно это колонка 0 или роль данных)
+        selected_row = self.table.currentRow()
+        if selected_row < 0:
+            QMessageBox.warning(self, "Внимание", "Выберите запись для удаления")
+            return
+
+        # Важно: предполагаем, что id хранится в данных элемента первой колонки
+        item = self.table.item(selected_row, 0)
+        entry_id = item.data(Qt.ItemDataRole.UserRole)
+
+        reply = QMessageBox.question(self, "Подтверждение",
+                                     "Вы уверены, что хотите переместить запись в корзину?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self.entry_manager.delete_entry(entry_id, soft_delete=True)
+                self.statusBar().showMessage("Запись перемещена в корзину", 5000)
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось удалить: {e}")
+
+    def edit_selected_entry(self):
+        """Редактирование выбранной записи"""
+        selected_row = self.table.currentRow()
+        if selected_row < 0:
+            QMessageBox.warning(self, "Внимание", "Выберите запись для редактирования")
+            return
+
+        item = self.table.item(selected_row, 0)
+        entry_id = item.data(Qt.ItemDataRole.UserRole)
+
+        entry_raw = self.db_helper.get_entry(entry_id)
+        if not entry_raw:
+            return
+
+        # Загружаем полные данные из менеджера
+        entry_data = self.entry_manager.get_entry(entry_id)
+
+        # Открываем окно добавления, но в режиме редактирования
+        from src.gui.add_record_window import AddRecordWindow
+        edit_win = AddRecordWindow(self)
+        edit_win.setWindowTitle("Редактировать запись")
+
+        # Заполняем поля старыми данными
+        edit_win.service.setText(entry_data.get('service', ''))
+        edit_win.login.setText(entry_data.get('username', ''))
+        edit_win.password.setText(entry_data.get('password', ''))
+        edit_win.notes.setText(entry_data.get('notes', ''))
+
+        # Переподключаем сигнал сохранения на handle_update
+        # БЕЗОПАСНОЕ переподключение сигнала
+        try:
+            edit_win.record_saved.disconnect()  # Пробуем отключить старое
+        except TypeError:
+            pass  # Если не было подключений — просто идем дальше
+
+        # Подключаем к обработчику ОБНОВЛЕНИЯ, а не создания
+        edit_win.record_saved.connect(
+            lambda s, l, p, n: self.handle_update(entry_id, s, l, p, n)
+        )
+
+        edit_win.exec()
+
+    def handle_update(self, entry_id, service, login, password, url, category, notes):
+        try:
+            data = {
+                'service': service, 'username': login, 'password': password,
+                'url': url, 'category': category, 'notes': notes
+            }
+            self.entry_manager.update_entry(entry_id, data)
+            self.statusBar().showMessage("Запись обновлена", 5000)
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось обновить: {e}")
 
 

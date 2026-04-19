@@ -24,7 +24,7 @@ class AddRecordWindow(QDialog):
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.notes = QLineEdit()
 
-        # Выбор категории (Requirement 3.2)
+        # Выбор категории
         self.category = QComboBox()
         self.category.addItems(["Uncategorized", "Work", "Personal", "Finance", "Social", "Development"])
         self.category.setEditable(True)  # Разрешаем ввод своей категории
