@@ -334,7 +334,7 @@ class MainWindow(QMainWindow):
         try:
             # Убедимся, что импорт актуален
             from src.gui.add_record_window import AddRecordWindow
-            self.add_win = AddRecordWindow(self)
+            self.add_win = AddRecordWindow(self.db_helper, self)
 
             self.add_win.record_saved.connect(
                 lambda s, l, p, u, c, n: self.handle_save(s, l, p, u, c, n)

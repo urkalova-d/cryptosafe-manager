@@ -29,7 +29,7 @@ class DatabaseHelper:
                     tags TEXT
                 )
             """)
-            # НОВАЯ ТАБЛИЦА: Корзина (Soft Delete - CRUD-4)
+            # Корзина
             cursor.execute("""
                             CREATE TABLE IF NOT EXISTS deleted_entries (
                                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,6 +39,14 @@ class DatabaseHelper:
                                 expiration_timestamp TIMESTAMP
                             )
                         """)
+            #  История паролей
+            cursor.execute("""
+                           CREATE TABLE IF NOT EXISTS password_history (
+                               id INTEGER PRIMARY KEY AUTOINCREMENT,
+                               password_hash TEXT NOT NULL,
+                               created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                           )
+                       """)
             # таблица для настроек мастер пароля, соли и тд
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS settings (
@@ -190,6 +198,31 @@ class DatabaseHelper:
         with self._lock:
             self.conn.execute("DELETE FROM vault_entries WHERE id = ?", (entry_id,))
             self.conn.commit()
+
+    def add_password_to_history(self, password_hash: str):
+        """Добавляет хеш пароля в историю."""
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute("INSERT INTO password_history (password_hash) VALUES (?)", (password_hash,))
+
+            # Оставляем только последние 20 записей
+            # Получаем ID 20-й с конца записи
+            cursor.execute("""
+                SELECT id FROM password_history ORDER BY id DESC LIMIT 1 OFFSET 20
+            """)
+            row = cursor.fetchone()
+            if row:
+                # Удаляем всё, что старше этого ID
+                cursor.execute("DELETE FROM password_history WHERE id < ?", (row['id'],))
+
+            self.conn.commit()
+
+    def is_password_in_history(self, password_hash: str) -> bool:
+        """Проверяет, был ли такой пароль недавно."""
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT id FROM password_history WHERE password_hash = ?", (password_hash,))
+            return cursor.fetchone() is not None
 
     def rotate_vault_keys(self, new_master_hash, new_auth_salt, new_enc_salt, re_encrypted_data):
         """Атомарное обновление при смене пароля."""
