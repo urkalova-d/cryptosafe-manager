@@ -194,6 +194,29 @@ class MainWindow(QMainWindow):
         add_action.triggered.connect(self.open_add_window)
         toolbar.addAction(add_action)
 
+        # --- Req 3: Global Toggle ---
+        self.toggle_pass_action = QAction("Показать пароли", self)
+        self.toggle_pass_action.setCheckable(True)
+        self.toggle_pass_action.toggled.connect(self.toggle_password_visibility)
+        toolbar.addAction(self.toggle_pass_action)
+
+        # Добавляем спейсер или просто следующую кнопку
+        toolbar.addSeparator()
+
+    def toggle_password_visibility(self, checked):
+        """Req 3: Toggle all passwords"""
+        self.table.toggle_all_passwords(checked)
+        self.toggle_pass_action.setText("Скрыть пароли" if checked else "Показать пароли")
+
+    def keyPressEvent(self, event):
+        """Req 3: Keyboard shortcut Ctrl+Shift+P"""
+        if event.modifiers() == (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier):
+            if event.key() == Qt.Key.Key_P:
+                current_state = self.toggle_pass_action.isChecked()
+                self.toggle_pass_action.setChecked(not current_state)
+                return
+        super().keyPressEvent(event)
+
     def create_table_area(self):
         #создание таблицы
         self.table = SecureTable()
@@ -394,18 +417,26 @@ class MainWindow(QMainWindow):
                     category = data.get('category', 'Uncategorized')
                     password = data.get('password', '')
                     notes = data.get('notes', '')
+                    url = data.get('url', '')
+                    rec_id = rec.get('id')
+                    modified = rec.get('updated_at', '')  # Req 1: Last modified date
 
-
-                    self.table.add_record(service_name, username, category, password, notes, self.copy_to_clipboard)
-                    last_row = self.table.rowCount() - 1
-                    item = self.table.item(last_row, 0)
-                    item.setData(Qt.ItemDataRole.UserRole, rec['id'])
+                    # Добавляем запись
+                    self.table.add_record(
+                        service_name,
+                        username,
+                        category,
+                        password,
+                        notes,
+                        self.copy_to_clipboard,
+                        record_id=rec_id,
+                        modified_date=modified,
+                        url=url
+                    )
                 except ValueError as ve:
-                    # Ошибка целостности (Invalid Tag)
-                    self.table.add_record("ОШИБКА ЦЕЛОСТНОСТИ", "", "", str(ve), None)
+                    self.table.add_record("ОШИБКА ЦЕЛОСТНОСТИ", "", "", "", str(ve), None)
                 except Exception as e:
                     print(f"Ошибка обработки записи: {e}")
-                    traceback.print_exc()
 
             self.statusBar().showMessage(f"Загружено записей: {len(records)}", 5000)
 
