@@ -7,6 +7,8 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from .encryption_service import EncryptionService
 from .password_generator import PasswordGenerator
 
+from thefuzz import fuzz
+
 
 class EntryManager(QObject):
     """
@@ -137,3 +139,110 @@ class EntryManager(QObject):
         except Exception as e:
             print(f"Error deleting entry: {e}")
             raise e
+
+    def _calculate_strength(self, password):
+        """Простая оценка силы пароля для фильтрации"""
+        if not password: return 0
+        score = 0
+        if len(password) >= 8: score += 1
+        if len(password) >= 12: score += 1
+        if any(c.isupper() for c in password): score += 1
+        if any(c.isdigit() for c in password): score += 1
+        if any(c in "!@#$%^&*()_+-=" for c in password): score += 1
+        return score
+
+    def filter_entries(self, all_entries, query):
+        """
+        Part 8: Продвинутая фильтрация.
+        Поддерживает:
+        - field:value (title:google, user:admin)
+        - strength:weak/medium/strong
+        - нечеткий поиск
+        """
+        if not query:
+            return all_entries
+
+        query = query.lower().strip()
+        filtered = []
+
+        # Разбор поискового запроса
+        # Извлекаем специальные фильтры
+        filters = {}
+        text_query = query
+
+        # Простая реализация парсинга "key:value"
+        parts = query.split()
+        clean_parts = []
+
+        for part in parts:
+            if ":" in part:
+                try:
+                    key, val = part.split(":", 1)
+                    filters[key.strip()] = val.strip()
+                except ValueError:
+                    pass
+            else:
+                clean_parts.append(part)
+
+        # Текст для полнотекстового поиска (все, что не key:value)
+        search_text_query = " ".join(clean_parts)
+
+        for entry in all_entries:
+            match = True
+
+            # 1. Применение фильтров (key:value)
+            for key, val in filters.items():
+                entry_val = ""
+
+                # Маппинг полей
+                if key in ["title", "service"]:
+                    entry_val = str(entry.get('service', ''))
+                elif key in ["user", "username"]:
+                    entry_val = str(entry.get('username', ''))
+                elif key in ["url"]:
+                    entry_val = str(entry.get('url', ''))
+                elif key in ["note", "notes"]:
+                    entry_val = str(entry.get('notes', ''))
+                elif key in ["cat", "category"]:
+                    entry_val = str(entry.get('category', ''))
+                elif key == "strength":
+                    # Специальный фильтр силы пароля
+                    pwd = entry.get('password', '')
+                    strength_score = self._calculate_strength(pwd)
+
+                    is_strong = strength_score >= 4
+                    is_medium = 2 <= strength_score < 4
+                    is_weak = strength_score < 2
+
+                    if val == "strong" and not is_strong:
+                        match = False
+                    elif val == "medium" and not is_medium:
+                        match = False
+                    elif val == "weak" and not is_weak:
+                        match = False
+                    continue  # Переходим к следующему фильтру
+
+                # Проверка вхождения (частичное совпадение)
+                if val not in entry_val.lower():
+                    match = False
+                    break
+
+            if not match:
+                continue
+
+            # 2. Полнотекстовый и нечеткий поиск
+            if search_text_query:
+                # Собираем строку для поиска
+                full_text = f"{entry.get('service', '')} {entry.get('username', '')} {entry.get('notes', '')} {entry.get('url', '')}".lower()
+
+                # Точное вхождение
+                if search_text_query in full_text:
+                    filtered.append(entry)
+                # Нечеткий поиск (терпимость к опечаткам)
+                elif fuzz.partial_ratio(search_text_query, full_text) > 75:  # Порог 75%
+                    filtered.append(entry)
+            else:
+                # Если только фильтры без текста
+                filtered.append(entry)
+
+        return filtered

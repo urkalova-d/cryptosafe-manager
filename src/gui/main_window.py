@@ -2,6 +2,7 @@ import sys
 import time
 import traceback
 from PyQt6.QtGui import QAction
+from PyQt6.QtCore import QSettings, QStringListModel  # --- NEW: для истории поиска ---
 
 from src.database.db import DatabaseHelper
 from src.gui.setup_wizard import SetupWizard
@@ -12,12 +13,10 @@ from PyQt6.QtCore import Qt, QTimer, QEvent, QObject, pyqtSignal, QThread
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox,
                              QTableWidget, QApplication, QTableWidgetItem, QHeaderView,
                              QMenuBar, QMenu, QStatusBar, QToolBar, QLabel,
-                             QProgressDialog) 
-
+                             QProgressDialog, QLineEdit, QCompleter)  # --- NEW: QCompleter ---
 from src.core.crypto.key_manager import KeyManager
 from src.core.crypto.authentication import AuthenticationService
 from src.core.vault.encryption_service import EncryptionService
-
 
 
 class LoadDataWorker(QObject):
@@ -37,13 +36,14 @@ class LoadDataWorker(QObject):
         except Exception as e:
             self.error.emit(str(e))
 
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("CryptoSafe Password Manager")
         self.resize(1000, 650)
 
-        #инициализация бд
+        # инициализация бд
         from src.database.db import db_manager
         self.db_helper = db_manager
         self.current_master_password = None
@@ -52,7 +52,6 @@ class MainWindow(QMainWindow):
         self.clipboard_timer = QTimer()
         self.clipboard_timer.timeout.connect(self.update_timer_label)
         self.remaining_time = 0
-
 
         # кр
         self.key_manager = KeyManager(self.db_helper)
@@ -80,17 +79,22 @@ class MainWindow(QMainWindow):
         # фильтр событий
         QApplication.instance().installEventFilter(self)
 
+        # --- NEW: Инициализация кэша и настроек поиска ---
+        self.all_records_cache = []  # Кэш для живого поиска
+        self.settings = QSettings("CryptoSafe", "PasswordManager")
+
         self.init_ui()
+
+        # Убрал дублирующий вызов setup_toolbar(), так как create_toolbar() уже есть в init_ui
+        # self.setup_toolbar()
+
         self.hide()
-        #проверка первого запуска
+        # проверка первого запуска
         QTimer.singleShot(100, self.check_first_run)
-
-
-
 
     def init_ui(self):
 
-        #центральный виджет
+        # центральный виджет
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
@@ -186,7 +190,7 @@ class MainWindow(QMainWindow):
         help_menu.addAction("О программе")
 
     def create_toolbar(self):
-        #создание панели инструментов
+        # создание панели инструментов
         toolbar = QToolBar("Main Toolbar")
         self.addToolBar(toolbar)
 
@@ -203,6 +207,26 @@ class MainWindow(QMainWindow):
         # Добавляем спейсер или просто следующую кнопку
         toolbar.addSeparator()
 
+        # --- NEW: Добавляем поиск прямо сюда ---
+        self.search_bar = QLineEdit()
+        self.search_bar.setPlaceholderText("Поиск (title:work, user:admin)...")
+        self.search_bar.setFixedWidth(250)
+        self.search_bar.setClearButtonEnabled(True)
+
+        # Живой поиск
+        self.search_bar.textChanged.connect(self.run_search)
+        # Сохранение истории по Enter
+        self.search_bar.returnPressed.connect(self.save_search_history)
+
+        # Настройка автодополнения
+        history = self.settings.value("search_history", [], type=list)
+        self.completer = QCompleter(history, self)
+        self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.search_bar.setCompleter(self.completer)
+
+        toolbar.addWidget(QLabel("  Поиск: "))
+        toolbar.addWidget(self.search_bar)
+
     def toggle_password_visibility(self, checked):
         """Req 3: Toggle all passwords"""
         self.table.toggle_all_passwords(checked)
@@ -218,18 +242,14 @@ class MainWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def create_table_area(self):
-        #создание таблицы
+        # создание таблицы
         self.table = SecureTable()
         self.main_layout.addWidget(self.table)
-
-        #  данные для теста
-        #self.table.add_record("Google", "user@gmail.com", "****", "Основная почта")
-        #self.table.add_record("GitHub", "dev_daria", "****", "Рабочий аккаунт")
 
     def copy_to_clipboard(self, password):
         from PyQt6.QtWidgets import QApplication
 
-        #роверка,что пароль дошел до функции
+        # роверка,что пароль дошел до функции
         if not password or password == "****":
             print("Ошибка: Пароль пуст или замаскирован")
             return
@@ -272,13 +292,13 @@ class MainWindow(QMainWindow):
         self.timer_label.setText("")
         self.status_bar.showMessage("Буфер обмена очищен", 3000)
 
-    def copy_password(self, password):#функция копирования запускающая процесс
+    def copy_password(self, password):  # функция копирования запускающая процесс
         QApplication.clipboard().setText(password)
-        self.status_bar.showMessage("Пароль скопирован в буфер", 5000)
+        self.statusBar().showMessage("Пароль скопирован в буфер", 5000)
         self.start_clipboard_timer(30)
 
     def check_first_run(self):
-        #переключение setup login
+        # переключение setup login
         master_hash = self.db_helper.get_setting("master_hash")
         if not master_hash:
             self.show_setup_wizard()
@@ -291,7 +311,7 @@ class MainWindow(QMainWindow):
         wizard.setup_finished.connect(self.on_setup_complete)
 
         if not wizard.exec():
-            sys.exit()# закрытиче крестиком
+            sys.exit()  # закрытиче крестиком
 
     def show_login_dialog(self):
         from src.gui.login_window import LoginWindow
@@ -301,7 +321,7 @@ class MainWindow(QMainWindow):
         self.login_win.login_attempt.connect(self.verify_login)
 
         if not self.login_win.exec():
-            sys.exit(0) # закрытие через крестик
+            sys.exit(0)  # закрытие через крестик
 
     def _run_logic(self):
         if not self.db_helper.get_setting("master_hash"):
@@ -310,7 +330,7 @@ class MainWindow(QMainWindow):
             self.show_login_dialog()
 
     def verify_login(self, password):
-        #Вызывается при попытке входа
+        # Вызывается при попытке входа
         self.hide()
 
         print(" ДИАГНОСТИКА ВХОДА")
@@ -368,7 +388,6 @@ class MainWindow(QMainWindow):
             print(f"Критическая ошибка при открытии окна: {e}")
             traceback.print_exc()
 
-
     def handle_save(self, service, login, password, url, category, notes):
         """Вызывается при сохранении из диалога"""
         try:
@@ -399,10 +418,15 @@ class MainWindow(QMainWindow):
             records = self.db_helper.get_all_entries()
             if not records:
                 self.statusBar().showMessage("База данных пуста", 5000)
+                # --- NEW: Очистка кэша если пусто ---
+                self.all_records_cache = []
                 return
 
             if not self.key_manager.get_encryption_key():
                 return
+
+            # --- NEW: Список для кэша ---
+            cache_list = []
 
             for rec in records:
                 enc_blob = rec.get('encrypted_data')
@@ -421,6 +445,13 @@ class MainWindow(QMainWindow):
                     rec_id = rec.get('id')
                     modified = rec.get('updated_at', '')  # Req 1: Last modified date
 
+                    # --- NEW: Добавляем в кэш ---
+                    cache_entry = data.copy()
+                    cache_entry['id'] = rec_id
+                    cache_entry['created_at'] = rec.get('created_at')
+                    cache_entry['updated_at'] = modified
+                    cache_list.append(cache_entry)
+
                     # Добавляем запись
                     self.table.add_record(
                         service_name,
@@ -437,6 +468,9 @@ class MainWindow(QMainWindow):
                     self.table.add_record("ОШИБКА ЦЕЛОСТНОСТИ", "", "", "", str(ve), None)
                 except Exception as e:
                     print(f"Ошибка обработки записи: {e}")
+
+            # --- NEW: Сохраняем кэш ---
+            self.all_records_cache = cache_list
 
             self.statusBar().showMessage(f"Загружено записей: {len(records)}", 5000)
 
@@ -459,12 +493,12 @@ class MainWindow(QMainWindow):
         self.load_data_from_db()
 
     def load_data(self):
-        #Запуск процесса загрузки в фоновом потоке
+        # Запуск процесса загрузки в фоновом потоке
         self.statusBar().showMessage("Загрузка данных...")
 
         # создание поток
         self.loading_thread = QThread()
-        self.worker = LoadDataWorker(self.db_helper) 
+        self.worker = LoadDataWorker(self.db_helper)
         self.worker.moveToThread(self.loading_thread)
 
         # соединяем сигналы
@@ -585,7 +619,7 @@ class MainWindow(QMainWindow):
                                  "Процесс был прерван или произошла ошибка. Данные могут быть повреждены.")
 
     def on_setup_complete(self, password):
-        #Вызывается после успешной регистрации
+        # Вызывается после успешной регистрации
         try:
             # сохранение нового мастер пароля и ключа в бд
             self.key_manager.setup_new_user(password)
@@ -676,4 +710,65 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось обновить: {e}")
 
+    # ---------------------------------------------------------
+    # --- NEW: Search & Filter Logic ---
+    # ---------------------------------------------------------
 
+    def run_search(self):
+        """Part 8: Real-time search"""
+        query = self.search_bar.text()
+
+        # Если кэш пуст, ничего не делаем
+        if not self.all_records_cache:
+            return
+
+        # Фильтруем данные из кэша
+        filtered = self.entry_manager.filter_entries(self.all_records_cache, query)
+
+        # Обновляем таблицу
+        # Используем display_data если он есть в SecureTable, иначе перезагружаем.
+        # В предыдущих файлах я добавил метод display_data, если его нет - вызовут ошибку,
+        # но будем считать что SecureTable обновлен.
+        if hasattr(self.table, 'display_data'):
+            self.table.display_data(filtered, self.copy_to_clipboard)
+        else:
+            # Fallback: ручное обновление, если метода нет (но лучше добавить его в SecureTable)
+            self.table.setRowCount(0)
+            for rec in filtered:
+                self.table.add_record(
+                    rec.get('service', ''),
+                    rec.get('username', ''),
+                    rec.get('category', 'Uncategorized'),
+                    rec.get('password', ''),
+                    rec.get('notes', ''),
+                    self.copy_to_clipboard,
+                    rec.get('id'),
+                    rec.get('updated_at', ''),
+                    rec.get('url', '')
+                )
+
+        if query:
+            self.statusBar().showMessage(f"Найдено результатов: {len(filtered)}", 3000)
+
+    def save_search_history(self):
+        """Part 8: Save last 10 queries"""
+        query = self.search_bar.text().strip()
+        if not query:
+            return
+
+        history = self.settings.value("search_history", [], type=list)
+
+        # Удаляем дубликаты и добавляем в начало
+        if query in history:
+            history.remove(query)
+        history.insert(0, query)
+
+        # Храним только 10
+        history = history[:10]
+
+        self.settings.setValue("search_history", history)
+
+        # Обновляем модель комплетера
+        self.completer.setModel(QStringListModel(history, self))
+
+    # Удален дублирующий метод setup_toolbar, так как его функционал перенесен в create_toolbar

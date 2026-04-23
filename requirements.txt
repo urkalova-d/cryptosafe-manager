@@ -12,6 +12,10 @@ PyQt6-sip==13.6.0
 pyperclip==1.8.2
 python-dotenv==1.0.1
 
+# Поиск ( Sprint 3, Part 8 )
+thefuzz==0.22.1
+python-Levenshtein==0.25.0
+
 # Тестирование
 pytest==8.0.0
 pytest-qt==4.4.0

@@ -105,6 +105,36 @@ class SecureTable(QTableWidget):
 
         self.setCellWidget(row_position, 5, container)
 
+    def display_data(self, records, copy_callback=None):
+        """
+        Part 8: Метод для обновления таблицы списком записей (используется при поиске).
+        Принимает список словарей.
+        """
+        self.setRowCount(0)  # Очистка таблицы
+        self._password_data.clear()
+
+        # Временно отключаем сортировку для ускорения массовой вставки
+        self.setSortingEnabled(False)
+
+        for rec in records:
+            # Маппинг ключей словаря к аргументам add_record
+            service = rec.get('service', rec.get('title', 'Unknown'))
+            login = rec.get('username', '')
+            password = rec.get('password', '')
+            url = rec.get('url', '')
+            category = rec.get('category', 'Uncategorized')
+            notes = rec.get('notes', '')
+            rec_id = rec.get('id')
+            modified = rec.get('updated_at', '')
+
+            self.add_record(
+                service, login, category, password, notes,
+                copy_callback, rec_id, modified, url
+            )
+
+        # Включаем сортировку обратно
+        self.setSortingEnabled(True)
+
     def _extract_domain(self, url):
         """Req 1: Extract domain from URL"""
         if not url:
