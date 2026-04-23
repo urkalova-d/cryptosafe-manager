@@ -37,6 +37,9 @@ class KeyDerivationService:
 
     def derive_encryption_key(self, password: str, salt: bytes) -> bytes:
         """Генерация ключа шифрования через PBKDF2"""
+        print(f"[KDF] Password length: {len(password)}")
+        print(f"[KDF] Salt hex: {salt.hex()}")
+
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
@@ -44,7 +47,9 @@ class KeyDerivationService:
             iterations=self.pbkdf2_iterations,
             backend=default_backend()
         )
-        return kdf.derive(password.encode())
+        result = kdf.derive(password.encode('utf-8'))
+        print(f"[KDF] Derived key (hex first 16): {result.hex()[:32]}")
+        return result
 
     def derive_auth_key(self, password: str, salt: bytes) -> bytes:
         """Генерация ключа аутентификации через Argon2id (ДОБАВЛЕНО)"""

@@ -8,20 +8,28 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.backends import default_backend
 from cryptography.exceptions import InvalidTag
 
+
 class EncryptionService:
     def __init__(self, key_manager):
         self.key_manager = key_manager
 
     def _get_aes_key(self):
-        #Получает сырой ключ из KeyManager
+        # Получает сырой ключ из KeyManager
         key = self.key_manager.get_encryption_key()
         if not key:
             raise PermissionError("Хранилище заблокировано. Ключ недоступен.")
 
+        # Добавляем диагностику
+        print(f"[AES] Raw key from KeyManager: {key.hex()[:32] if key else 'None'}")
+        print(f"[AES] Raw key length: {len(key) if key else 0}")
+
+        # ВАЖНО: Если ключ уже 32 байта, возвращаем его как есть
         if len(key) == 32:
+            print(f"[AES] Using raw key as is")
             return key
         else:
-            # Если длина отличается , деривируем через HKDF
+            # Если длина отличается, деривируем через HKDF
+            print(f"[AES] Key length {len(key)} != 32, deriving via HKDF")
             hkdf = HKDF(
                 algorithm=hashes.SHA256(),
                 length=32,
@@ -29,10 +37,12 @@ class EncryptionService:
                 info=b'aes-gcm-vault-key',
                 backend=default_backend()
             )
-            return hkdf.derive(key)
+            derived = hkdf.derive(key)
+            print(f"[AES] Derived key: {derived.hex()[:32]}")
+            return derived
 
     def encrypt_entry(self, entry_data: dict) -> bytes:
-        #Упаковывает данные записи в JSON, добавляет метаданные и шифрует AES-256-GCM
+        # Упаковывает данные записи в JSON, добавляет метаданные и шифрует AES-256-GCM
 
         # 1. Подготовка JSON полезной нагрузки
         payload = {
@@ -57,38 +67,51 @@ class EncryptionService:
 
         ciphertext = aesgcm.encrypt(nonce, plaintext, None)
 
+        # 3. ВЕРИФИКАЦИЯ: Проверяем что можем расшифровать свои же данные
+        try:
+            test_plain = aesgcm.decrypt(nonce, ciphertext, None)
+            test_json = json.loads(test_plain.decode('utf-8'))
+            if test_json.get('title') != payload.get('title'):
+                raise ValueError("Verification failed: title mismatch")
+        except Exception as e:
+            print(f"КРИТИЧЕСКАЯ ОШИБКА: Шифрование прошло, но расшифровка не удалась: {e}")
+            raise RuntimeError("Encryption verification failed") from e
+
         # Возвращаем raw bytes (nonce + ciphertext)
         return nonce + ciphertext
 
     def decrypt_entry(self, encrypted_data: bytes) -> dict:
-        #Расшифровывает BLOB из БД и возвращает словарь
         if not encrypted_data:
             return {}
+
+        print(f"[DECRYPT] Data type: {type(encrypted_data)}")
+        print(f"[DECRYPT] Data length: {len(encrypted_data)}")
+
+        if len(encrypted_data) <= 12:
+            raise ValueError(f"Invalid encrypted data length: {len(encrypted_data)}")
 
         try:
             key = self._get_aes_key()
             aesgcm = AESGCM(key)
 
-            # Разбираем структуру
             nonce = encrypted_data[:12]
             ciphertext = encrypted_data[12:]
 
-            # Расшифровка
+            print(f"[DECRYPT] Nonce hex: {nonce.hex()}")
+            print(f"[DECRYPT] Ciphertext length: {len(ciphertext)}")
+
             plaintext = aesgcm.decrypt(nonce, ciphertext, None)
+            result = json.loads(plaintext.decode('utf-8'))
+            print(f"[DECRYPT] SUCCESS: {result.get('title')}")
+            return result
 
-            # Парсим JSON
-            return json.loads(plaintext.decode('utf-8'))
-
-        except InvalidTag:
-            #  Обработка tampering
-            print("КРИТИЧЕСКАЯ ОШИБКА: Данные были изменены или ключ неверен!")
-            raise ValueError("Ошибка целостности данных: Invalid Authentication Tag")
-        except Exception as e:
-            print(f"Ошибка расшифровки: {e}")
-            raise
+        except InvalidTag as e:
+            print(f"[DECRYPT] InvalidTag error!")
+            print(f"[DECRYPT] Key hex first 16: {key.hex()[:32] if key else 'None'}")
+            raise ValueError("Ошибка целостности данных") from e
 
     def encrypt(self, plaintext: str) -> str:
-        #Шифрует строку с использованием AES-256-GCM
+        # Шифрует строку с использованием AES-256-GCM
         if not plaintext:
             return ""
 
@@ -106,7 +129,7 @@ class EncryptionService:
         return base64.urlsafe_b64encode(combined).decode('utf-8')
 
     def decrypt(self, encrypted_data: str) -> str:
-        #Расшифровывает строку, зашифрованную методом encrypt
+        # Расшифровывает строку, зашифрованную методом encrypt
 
         if not encrypted_data:
             return ""

@@ -144,17 +144,23 @@ class DatabaseHelper:
         """Сохраняет зашифрованный JSON-блоб и метаданные."""
         with self._lock:
             try:
+                if not isinstance(encrypted_data, bytes):
+                    encrypted_data = bytes(encrypted_data)
+
+                print(f"[DB] Saving {len(encrypted_data)} bytes")
+
                 self.conn.execute("BEGIN TRANSACTION")
                 cursor = self.conn.cursor()
                 cursor.execute("""
                     INSERT INTO vault_entries (encrypted_data, tags, created_at, updated_at)
                     VALUES (?, ?, datetime('now'), datetime('now'))
-                """, (encrypted_data, tags))
+                """, (sqlite3.Binary(encrypted_data), tags))
                 entry_id = cursor.lastrowid
                 self.conn.commit()
                 return entry_id
             except Exception as e:
                 self.conn.rollback()
+                print(f"[DB] Error in add_entry: {e}")
                 raise e
 
     def get_entry(self, entry_id: int):
@@ -163,14 +169,34 @@ class DatabaseHelper:
             cursor.execute("SELECT id, encrypted_data, created_at, updated_at, tags FROM vault_entries WHERE id = ?",
                            (entry_id,))
             row = cursor.fetchone()
-            return dict(row) if row else None
+            if row:
+                result = dict(row)
+                # Конвертируем encrypted_data
+                if 'encrypted_data' in result and isinstance(result['encrypted_data'], memoryview):
+                    result['encrypted_data'] = bytes(result['encrypted_data'])
+                return result
+            return None
 
     def get_all_entries(self):
         """Возвращает список словарей с id, зашифрованными данными и метаданными."""
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute("SELECT id, encrypted_data, created_at, updated_at, tags FROM vault_entries")
-            return [dict(row) for row in cursor.fetchall()]
+            result = []
+            for row in cursor.fetchall():
+                row_dict = {}
+                row_dict['id'] = row['id']
+                # Принудительно конвертируем в bytes
+                enc_data = row['encrypted_data']
+                if isinstance(enc_data, memoryview):
+                    enc_data = bytes(enc_data)
+                row_dict['encrypted_data'] = enc_data
+                row_dict['created_at'] = row['created_at']
+                row_dict['updated_at'] = row['updated_at']
+                row_dict['tags'] = row['tags']
+                result.append(row_dict)
+            return result
+
 
     def update_entry(self, entry_id: int, encrypted_data: bytes, tags: str = None):
         """Обновление записи."""

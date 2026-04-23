@@ -25,81 +25,85 @@ class PasswordGenerator:
 
     @classmethod
     def generate(cls, length: int = 16, exclude_ambiguous: bool = True, db_helper=None) -> Tuple[str, int]:
+        """Стандартная генерация (использует настройки по умолчанию)"""
+        return cls.generate_custom(
+            length=length,
+            use_upper=True, use_lower=True, use_digits=True, use_symbols=True,
+            exclude_ambiguous=exclude_ambiguous,
+            db_helper=db_helper
+        )
+
+    @classmethod
+    def generate_custom(cls, length: int = 16,
+                        use_upper: bool = True, use_lower: bool = True,
+                        use_digits: bool = True, use_symbols: bool = True,
+                        exclude_ambiguous: bool = True, db_helper=None) -> Tuple[str, int]:
         """
-        Генерация пароля.
-        Args:
-            length: Длина пароля (8-64, по умолчанию 16)
-            exclude_ambiguous: Исключать ли неоднозначные символы
-            db_helper: Ссылка на БД для проверки истории (Req 5)
-        Returns:
-            Tuple[str, int]: (пароль, оценка силы 0-4)
+        Генерация с кастомными параметрами.
+        Req 1: Configuration options.
         """
-        # Req 2: Валидация длины
-        if length < 8:
-            length = 8
-        if length > 64:
-            length = 64
+        if length < 8: length = 8
+        if length > 64: length = 64
 
-        # Формируем наборы символов с учетом исключений
-        # Вычисляем их здесь, внутри метода, чтобы избежать ошибок области видимости класса
-        if exclude_ambiguous:
-            upper_set = ''.join(c for c in cls.UPPER if c not in cls.AMBIGUOUS)
-            lower_set = ''.join(c for c in cls.LOWER if c not in cls.AMBIGUOUS)
-            digits_set = ''.join(c for c in cls.DIGITS if c not in cls.AMBIGUOUS)
-            symbols_set = ''.join(c for c in cls.SYMBOLS if c not in cls.AMBIGUOUS)
-        else:
-            upper_set = cls.UPPER
-            lower_set = cls.LOWER
-            digits_set = cls.DIGITS
-            symbols_set = cls.SYMBOLS
+        # Формируем наборы
+        sets = []
+        if use_upper:
+            s = cls.UPPER
+            sets.append(''.join(c for c in s if c not in cls.AMBIGUOUS) if exclude_ambiguous else s)
+        if use_lower:
+            s = cls.LOWER
+            sets.append(''.join(c for c in s if c not in cls.AMBIGUOUS) if exclude_ambiguous else s)
+        if use_digits:
+            s = cls.DIGITS
+            sets.append(''.join(c for c in s if c not in cls.AMBIGUOUS) if exclude_ambiguous else s)
+        if use_symbols:
+            s = cls.SYMBOLS
+            # Из символов тоже убираем неоднозначные, если нужно
+            sets.append(''.join(c for c in s if c not in cls.AMBIGUOUS) if exclude_ambiguous else s)
 
-        char_sets = [upper_set, lower_set, digits_set, symbols_set]
-        # Фильтруем пустые наборы (если вдруг какой-то набор стал пустым после исключений)
-        char_sets = [s for s in char_sets if s]
-        all_chars = ''.join(char_sets)
+        # Фильтруем пустые наборы
+        sets = [s for s in sets if s]
+        if not sets:
+            raise ValueError("Должен быть выбран хотя бы один набор символов")
 
-        if not all_chars:
-            raise ValueError("No character sets selected")
+        all_chars = ''.join(sets)
 
         max_attempts = 100
         for _ in range(max_attempts):
             password = []
 
-            # Req 3: Гарантируем наличие минимум одного символа из каждого набора
-            for char_set in char_sets:
-                password.append(secrets.choice(char_set))
+            # Req 3: Гарантируем наличие символа из каждого набора
+            for s in sets:
+                password.append(secrets.choice(s))
 
-            # Заполняем оставшуюся длину случайными символами
-            remaining_length = length - len(password)
-            password.extend(secrets.choice(all_chars) for _ in range(remaining_length))
+            # Остальное заполняем случайно
+            remaining = length - len(password)
+            password.extend(secrets.choice(all_chars) for _ in range(remaining))
 
-            # Перемешиваем результат (Fisher-Yates shuffle)
-            # Req 1: Используем secrets для перемешивания
+            # Перемешиваем
             for i in range(len(password) - 1, 0, -1):
                 j = secrets.randbelow(i + 1)
                 password[i], password[j] = password[j], password[i]
 
             result = ''.join(password)
 
-            # Req 4: Проверка сложности zxcvbn
+            # Проверка силы
             score = 0
             if ZXCVBN_AVAILABLE:
-                results = zxcvbn(result)
-                score = results['score']
-                if score < 3:
-                    continue
+                res = zxcvbn(result)
+                score = res['score']
+                if score < 3: continue
 
-            # Req 5: Проверка истории
+            # Проверка истории
             if db_helper:
-                pwd_hash = hashlib.sha256(result.encode()).hexdigest()
-                if db_helper.is_password_in_history(pwd_hash):
+                h = hashlib.sha256(result.encode()).hexdigest()
+                if db_helper.is_password_in_history(h):
                     continue
-
-                db_helper.add_password_to_history(pwd_hash)
+                db_helper.add_password_to_history(h)
 
             return result, score
 
-        raise RuntimeError("Failed to generate strong unique password after 100 attempts")
+        raise RuntimeError("Could not generate password")
 
     @staticmethod
     def validate_password_strength(password: str) -> tuple[bool, str]:
