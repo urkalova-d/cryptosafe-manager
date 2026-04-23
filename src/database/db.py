@@ -8,9 +8,11 @@ class DatabaseHelper:
     def __init__(self, db_path="vault.db"):
         self.db_path = db_path
         self._lock = Lock()
-        # Создаем постоянное соединение для всего жизненного цикла объекта
-        self.conn = sqlite3.connect(self.db_path, check_same_thread=False , timeout=20)
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=20)
         self.conn.row_factory = sqlite3.Row
+        # --- NEW: Включаем режим WAL для многопоточности и оптимизации ---
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA synchronous=NORMAL")
         self.init_db()
 
     def get_connection(self):
@@ -68,6 +70,47 @@ class DatabaseHelper:
             # Политика паролей: минимум 12 символов
             cursor.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES (?, ?)",
                            ("policy_min_length", "12"))
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS search_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    query TEXT NOT NULL,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_vault_created_at ON vault_entries(created_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_vault_updated_at ON vault_entries(updated_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_vault_tags ON vault_entries(tags)")
+
+            # --- NEW: Req 2. FTS5 Full-text search ---
+            # Создаем виртуальную таблицу для поиска по тегам
+            cursor.execute("""
+                            CREATE VIRTUAL TABLE IF NOT EXISTS vault_entries_fts USING fts5(
+                                tags, 
+                                content=vault_entries, 
+                                content_rowid=id
+                            )
+                        """)
+            # Триггеры для автоматического обновления поискового индекса
+            cursor.execute("""
+                            CREATE TRIGGER IF NOT EXISTS vault_ai AFTER INSERT ON vault_entries BEGIN
+                                INSERT INTO vault_entries_fts(rowid, tags) VALUES (new.id, new.tags);
+                            END
+                        """)
+            cursor.execute("""
+                            CREATE TRIGGER IF NOT EXISTS vault_ad AFTER DELETE ON vault_entries BEGIN
+                                INSERT INTO vault_entries_fts(vault_entries_fts, rowid, tags) 
+                                VALUES ('delete', old.id, old.tags);
+                            END
+                        """)
+            cursor.execute("""
+                            CREATE TRIGGER IF NOT EXISTS vault_au AFTER UPDATE ON vault_entries BEGIN
+                                INSERT INTO vault_entries_fts(vault_entries_fts, rowid, tags) 
+                                VALUES ('delete', old.id, old.tags);
+                                INSERT INTO vault_entries_fts(rowid, tags) VALUES (new.id, new.tags);
+                            END
+                        """)
 
             self.conn.commit()
 
@@ -325,6 +368,25 @@ class DatabaseHelper:
     def close(self):
         if hasattr(self, 'conn') and self.conn:
             self.conn.close()
+
+    # Добавь методы для работы с историей
+    def save_search_query(self, query_text: str):
+        with self._lock:
+            # Удаляем дубликат, если есть
+            self.conn.execute("DELETE FROM search_history WHERE query = ?", (query_text,))
+            # Вставляем новый
+            self.conn.execute("INSERT INTO search_history (query) VALUES (?)", (query_text,))
+            # Ограничиваем историю 10 записями
+            self.conn.execute("""
+                DELETE FROM search_history WHERE id NOT IN 
+                (SELECT id FROM search_history ORDER BY timestamp DESC LIMIT 10)
+            """)
+            self.conn.commit()
+
+    def get_search_history(self):
+        with self._lock:
+            cursor = self.conn.execute("SELECT query FROM search_history ORDER BY timestamp DESC")
+            return [row['query'] for row in cursor.fetchall()]
 
 
 
