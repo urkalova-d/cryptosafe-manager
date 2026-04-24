@@ -18,7 +18,7 @@ class KeyStorage:
     INACTIVITY_TIMEOUT = 3600
 
     def __init__(self):
-        # ИНИЦИАЛИЗИРУЕМ АТРИБУТЫ ВСЕГДА, независимо от защиты
+        # инициализация атрибутов
         self._auth_key: Optional[bytearray] = None
         self._encryption_key: Optional[bytearray] = None
         self._last_activity_time: float = 0
@@ -28,7 +28,7 @@ class KeyStorage:
         self._protection_method = None
         self._os_type = platform.system()
 
-        # Инициализация защиты памяти (только если включена)
+        # Инициализация защиты памяти 
         if ENABLE_MEMORY_PROTECTION:
             self._init_secure_memory()
             if self._memory_protection_available:
@@ -41,7 +41,7 @@ class KeyStorage:
         print("[KeyStorage] Initialized")
 
     def _init_secure_memory(self):
-        """Инициализация защищенных областей памяти"""
+        #Инициализация защищенных областей памяти
         if self._os_type == "Windows":
             self._init_windows_protection()
         elif self._os_type in ["Linux", "Darwin"]:
@@ -153,7 +153,7 @@ class KeyStorage:
         return False
 
     def set_keys(self, auth_key: Optional[bytes], enc_key: Optional[bytes]):
-        """Установка ключей с защитой памяти"""
+        #Установка ключей с защитой памяти
         print(f"[KeyStorage] set_keys called - enc_key length: {len(enc_key) if enc_key else 0}")
 
         # Очищаем старые ключи
@@ -178,7 +178,7 @@ class KeyStorage:
         self._update_activity()
 
     def get_enc_key(self) -> Optional[bytes]:
-        """Получение ключа шифрования"""
+        #Получение ключа шифрования 
         print(f"[KeyStorage] get_enc_key called")
 
         if self._is_locked or not self._is_active:
@@ -208,7 +208,7 @@ class KeyStorage:
             return None
 
     def get_auth_key(self) -> Optional[bytes]:
-        """Получение ключа аутентификации"""
+        #Получение ключа аутентификации
         print(f"[KeyStorage] get_auth_key called")
 
         if self._is_locked or not self._is_active:

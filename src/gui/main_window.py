@@ -79,14 +79,11 @@ class MainWindow(QMainWindow):
         # фильтр событий
         QApplication.instance().installEventFilter(self)
 
-        # --- NEW: Инициализация кэша и настроек поиска ---
-        self.all_records_cache = []  # Кэш для живого поиска
+        # инициализация кэша и настроек поиска
+        self.all_records_cache = []
         self.settings = QSettings("CryptoSafe", "PasswordManager")
 
         self.init_ui()
-
-        # Убрал дублирующий вызов setup_toolbar(), так как create_toolbar() уже есть в init_ui
-        # self.setup_toolbar()
 
         self.hide()
         # проверка первого запуска
@@ -107,7 +104,7 @@ class MainWindow(QMainWindow):
         self.start_clipboard_timer(30)
 
     def eventFilter(self, obj, event):
-        # активность на экране для таймера
+        # активность на экране
         if event.type() in [QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress]:
             if hasattr(self, 'auth_service') and self.auth_service.is_authenticated():
                 self.auth_service.update_activity()
@@ -139,6 +136,9 @@ class MainWindow(QMainWindow):
         self.show()
 
         self.statusBar().showMessage("Вы успешно вошли в систему")
+
+
+
 
     def on_user_logged_out(self):
         # для события выхода
@@ -207,18 +207,18 @@ class MainWindow(QMainWindow):
         # Добавляем спейсер или просто следующую кнопку
         toolbar.addSeparator()
 
-        # --- NEW: Добавляем поиск прямо сюда ---
+         #поиск
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Поиск (title:work, user:admin)...")
         self.search_bar.setFixedWidth(250)
         self.search_bar.setClearButtonEnabled(True)
 
-        # Живой поиск
+        # живой поиск
         self.search_bar.textChanged.connect(self.run_search)
-        # Сохранение истории по Enter
+        # сохранение истории энтр
         self.search_bar.returnPressed.connect(self.save_search_history)
 
-        # Настройка автодополнения
+        # настройка автодополнения
         history = self.settings.value("search_history", [], type=list)
         self.completer = QCompleter(history, self)
         self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
@@ -227,13 +227,15 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(QLabel("  Поиск: "))
         toolbar.addWidget(self.search_bar)
 
+
+
     def toggle_password_visibility(self, checked):
-        """Req 3: Toggle all passwords"""
+        #показ паролей
         self.table.toggle_all_passwords(checked)
         self.toggle_pass_action.setText("Скрыть пароли" if checked else "Показать пароли")
 
     def keyPressEvent(self, event):
-        """Req 3: Keyboard shortcut Ctrl+Shift+P"""
+        #показ парлей через горяие клавиши
         if event.modifiers() == (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier):
             if event.key() == Qt.Key.Key_P:
                 current_state = self.toggle_pass_action.isChecked()
@@ -389,9 +391,8 @@ class MainWindow(QMainWindow):
             traceback.print_exc()
 
     def handle_save(self, service, login, password, url, category, notes):
-        """Вызывается при сохранении из диалога"""
+        #вызывается при сохранении из диалога
         try:
-            # 1подготовка данных
             entry_data = {
                 'service': service,
                 'username': login,
@@ -400,7 +401,7 @@ class MainWindow(QMainWindow):
                 'url': url,
                 'notes': notes
             }
-            # Используем EntryManager вместо прямого шифрования
+            # Использование EntryManager вместо прямого шифрования
             self.entry_manager.create_entry(entry_data)
 
             self.statusBar().showMessage(f"Запись {service} добавлена", 5000)
@@ -418,14 +419,14 @@ class MainWindow(QMainWindow):
             records = self.db_helper.get_all_entries()
             if not records:
                 self.statusBar().showMessage("База данных пуста", 5000)
-                # --- NEW: Очистка кэша если пусто ---
+                #очистка кэша если пусто
                 self.all_records_cache = []
                 return
 
             if not self.key_manager.get_encryption_key():
                 return
 
-            # --- NEW: Список для кэша ---
+            #  список для кэша
             cache_list = []
 
             for rec in records:
@@ -443,16 +444,16 @@ class MainWindow(QMainWindow):
                     notes = data.get('notes', '')
                     url = data.get('url', '')
                     rec_id = rec.get('id')
-                    modified = rec.get('updated_at', '')  # Req 1: Last modified date
+                    modified = rec.get('updated_at', '')
 
-                    # --- NEW: Добавляем в кэш ---
+                    # добавление в кэш
                     cache_entry = data.copy()
                     cache_entry['id'] = rec_id
                     cache_entry['created_at'] = rec.get('created_at')
                     cache_entry['updated_at'] = modified
                     cache_list.append(cache_entry)
 
-                    # Добавляем запись
+                    #добавление записи
                     self.table.add_record(
                         service_name,
                         username,
@@ -469,7 +470,7 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     print(f"Ошибка обработки записи: {e}")
 
-            # --- NEW: Сохраняем кэш ---
+            #  сохрание кэша
             self.all_records_cache = cache_list
 
             self.statusBar().showMessage(f"Загружено записей: {len(records)}", 5000)
@@ -481,7 +482,7 @@ class MainWindow(QMainWindow):
 
     def on_entry_created(self, entry_id):
         print(f"Событие: EntryCreated (ID: {entry_id})")
-        # Можно обновить только одну строку, но для простоты перезагрузим таблицу
+        # перезагрузка таблицы
         self.load_data_from_db()
 
     def on_entry_updated(self, entry_id):
@@ -496,12 +497,12 @@ class MainWindow(QMainWindow):
         # Запуск процесса загрузки в фоновом потоке
         self.statusBar().showMessage("Загрузка данных...")
 
-        # создание поток
+        # создание потока
         self.loading_thread = QThread()
         self.worker = LoadDataWorker(self.db_helper)
         self.worker.moveToThread(self.loading_thread)
 
-        # соединяем сигналы
+        # соединение сигналов
         self.loading_thread.started.connect(self.worker.run)
         self.worker.finished.connect(self.on_load_finished)
         self.worker.error.connect(lambda e: print(f"Worker Error: {e}"))
@@ -545,7 +546,7 @@ class MainWindow(QMainWindow):
         dialog = PasswordChangeDialog(self.key_manager, self.db_helper, self)
 
         if dialog.exec():
-            # Если диалог прошел валидацию -> начинаем процесс
+            # если диалог прошел валидацию  начинаем процесс
             old_pwd = dialog.current_pwd_input.text()
             new_pwd = dialog.new_pwd_input.text()
 
@@ -557,8 +558,7 @@ class MainWindow(QMainWindow):
 
             def update_progress(val):
                 progress.setValue(val)
-                QApplication.processEvents()  # Чтобы окно не зависало
-
+                QApplication.processEvents()
             # Запуск процесса
             success = self.key_manager.rotate_keys(
                 old_pwd,
@@ -635,14 +635,12 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Ошибка", f"Не удалось завершить настройку: {e}")
 
     def delete_selected_entry(self):
-        """Удаление выбранной записи"""
-        # Получаем ID из скрытой колонки таблицы (обычно это колонка 0 или роль данных)
-        selected_row = self.table.currentRow()
+        #удаление выбранной записи
+        selected_row = self.table.currentRow()# получение айди из скрытой колонки таблицы
         if selected_row < 0:
             QMessageBox.warning(self, "Внимание", "Выберите запись для удаления")
             return
 
-        # Важно: предполагаем, что id хранится в данных элемента первой колонки
         item = self.table.item(selected_row, 0)
         entry_id = item.data(Qt.ItemDataRole.UserRole)
 
@@ -658,7 +656,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить: {e}")
 
     def edit_selected_entry(self):
-        """Редактирование выбранной записи"""
+        #редактирование выбранной записи
         selected_row = self.table.currentRow()
         if selected_row < 0:
             QMessageBox.warning(self, "Внимание", "Выберите запись для редактирования")
@@ -671,26 +669,25 @@ class MainWindow(QMainWindow):
         if not entry_raw:
             return
 
-        # Загружаем полные данные из менеджера
+        # загрузка данных  из менеджера
         entry_data = self.entry_manager.get_entry(entry_id)
 
-        # Открываем окно добавления, но в режиме редактирования
+        # открытие окна добавления в режиме редактирования
         from src.gui.add_record_window import AddRecordWindow
         edit_win = AddRecordWindow(self)
         edit_win.setWindowTitle("Редактировать запись")
 
-        # Заполняем поля старыми данными
+        # Заполнение поля старыми данными
         edit_win.service.setText(entry_data.get('service', ''))
         edit_win.login.setText(entry_data.get('username', ''))
         edit_win.password.setText(entry_data.get('password', ''))
         edit_win.notes.setText(entry_data.get('notes', ''))
 
-        # Переподключаем сигнал сохранения на handle_update
-        # БЕЗОПАСНОЕ переподключение сигнала
+        # Переподключение сигнала сохранения на handle_update
         try:
-            edit_win.record_saved.disconnect()  # Пробуем отключить старое
+            edit_win.record_saved.disconnect()  # попытка отключить старое
         except TypeError:
-            pass  # Если не было подключений — просто идем дальше
+            pass  # если не было подключений
 
         # Подключаем к обработчику ОБНОВЛЕНИЯ, а не создания
         edit_win.record_saved.connect(
@@ -710,29 +707,21 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось обновить: {e}")
 
-    # ---------------------------------------------------------
-    # --- NEW: Search & Filter Logic ---
-    # ---------------------------------------------------------
-
+    #  поиск и фильтрация
     def run_search(self):
-        """Part 8: Real-time search"""
+        #поиск в реальном времени
         query = self.search_bar.text()
 
-        # Если кэш пуст, ничего не делаем
         if not self.all_records_cache:
             return
 
-        # Фильтруем данные из кэша
+        # Фильтр данных из кэша
         filtered = self.entry_manager.filter_entries(self.all_records_cache, query)
 
-        # Обновляем таблицу
-        # Используем display_data если он есть в SecureTable, иначе перезагружаем.
-        # В предыдущих файлах я добавил метод display_data, если его нет - вызовут ошибку,
-        # но будем считать что SecureTable обновлен.
         if hasattr(self.table, 'display_data'):
             self.table.display_data(filtered, self.copy_to_clipboard)
         else:
-            # Fallback: ручное обновление, если метода нет (но лучше добавить его в SecureTable)
+            # ручное обновление
             self.table.setRowCount(0)
             for rec in filtered:
                 self.table.add_record(
@@ -751,24 +740,21 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Найдено результатов: {len(filtered)}", 3000)
 
     def save_search_history(self):
-        """Part 8: Save last 10 queries"""
+        #сохранение последних 10 поисеов
         query = self.search_bar.text().strip()
         if not query:
             return
 
         history = self.settings.value("search_history", [], type=list)
 
-        # Удаляем дубликаты и добавляем в начало
+        # удаление дубликатов и добавление в начало 
         if query in history:
             history.remove(query)
         history.insert(0, query)
 
-        # Храним только 10
         history = history[:10]
 
         self.settings.setValue("search_history", history)
 
         # Обновляем модель комплетера
         self.completer.setModel(QStringListModel(history, self))
-
-    # Удален дублирующий метод setup_toolbar, так как его функционал перенесен в create_toolbar

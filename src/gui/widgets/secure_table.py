@@ -10,7 +10,7 @@ class SecureTable(QTableWidget):
         self.setColumnCount(6)
         self.setHorizontalHeaderLabels(["Сервис", "Логин", "URL", "Категория", "Пароль",  "Действие"])
 
-        # Req 2: Настройки таблицы
+        # Настройки таблицы
         self.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)  # Multi-select
         self.setAlternatingRowColors(True)
@@ -35,29 +35,29 @@ class SecureTable(QTableWidget):
         self._passwords_visible = False
         self._password_data = {}  # Храним ID -> пароль
 
-        # Req 2: Контекстное меню
+        #  Контекстное меню
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self.show_context_menu)
 
     def add_record(self, service, login, category, password, notes, copy_callback=None, record_id=None,
                    modified_date=None, url=""):
-        """Добавление записи с маскировкой"""
+        #Добавление записи с маскировкой
         row_position = self.rowCount()
         self.insertRow(row_position)
 
         # Сохраняем ID строки
         self._password_data[row_position] = password
 
-        # --- Req 1: Обработка данных ---
+        #  Обработка данных 
 
-        # 1. Title
+        #  Title
         item_service = QTableWidgetItem(str(service))
         # Сохраняем ID в данных айтема для быстрого доступа
         if record_id:
             item_service.setData(Qt.ItemDataRole.UserRole, record_id)
         self.setItem(row_position, 0, item_service)
 
-        # 2. Username (masked as •••• after 4 characters)
+        # Username под маской
         if len(login) > 4:
             masked_login = login[:4] + "••••"
         else:
@@ -66,34 +66,33 @@ class SecureTable(QTableWidget):
         item_login.setToolTip(login)  # Показываем полный при наведении
         self.setItem(row_position, 1, item_login)
 
-        # 3. URL (extracted domain)
+        # URL 
         domain = self._extract_domain(url)
         item_url = QTableWidgetItem(domain)
         item_url.setToolTip(url)  # Полный URL в тултипе
         self.setItem(row_position, 2, item_url)
 
-        # 4. Category
+        #  категории
         self.setItem(row_position, 3, QTableWidgetItem(str(category)))
 
-        # 5. Password (toggleable)
+        # пароль
         # По умолчанию маскирован
         item_pass = QTableWidgetItem("••••••••")
         self.setItem(row_position, 4, item_pass)
 
-        # --- Action Column ---
         container = QWidget()
         layout = QHBoxLayout(container)
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(2)
 
-        # Кнопка копирования
+        #  копирование
         copy_btn = QPushButton("📋")
         copy_btn.setToolTip("Копировать")
         copy_btn.setFixedSize(QSize(30, 24))
         if copy_callback:
             copy_btn.clicked.connect(lambda: copy_callback(password))
 
-        # Кнопка "Глаз" (Req 3)
+        # глаз
         toggle_btn = QPushButton("👁")
         toggle_btn.setToolTip("Показать/Скрыть")
         toggle_btn.setFixedSize(QSize(30, 24))
@@ -106,12 +105,9 @@ class SecureTable(QTableWidget):
         self.setCellWidget(row_position, 5, container)
 
     def display_data(self, records, copy_callback=None):
-        """
-        Part 8: Метод для обновления таблицы списком записей (используется при поиске).
-        Принимает список словарей.
-        """
-        self.setRowCount(0)  # Очистка таблицы
-        self._password_data.clear()
+        #обновлении таблицы при поиске
+        # Безопасная очистка предыдущих данных перед загрузкой новых
+        self.secure_clear()
 
         # Временно отключаем сортировку для ускорения массовой вставки
         self.setSortingEnabled(False)
@@ -136,7 +132,6 @@ class SecureTable(QTableWidget):
         self.setSortingEnabled(True)
 
     def _extract_domain(self, url):
-        """Req 1: Extract domain from URL"""
         if not url:
             return ""
         try:
@@ -148,7 +143,7 @@ class SecureTable(QTableWidget):
             return url
 
     def toggle_row_password(self, row):
-        """Req 3: Toggle visibility for single row"""
+        # переключение видимости
         item = self.item(row, 4)
         if not item: return
 
@@ -161,7 +156,7 @@ class SecureTable(QTableWidget):
             item.setText("••••••••")
 
     def toggle_all_passwords(self, visible: bool):
-        """Req 3: Global toggle"""
+        #глобальное переклюение
         self._passwords_visible = visible
         for row in range(self.rowCount()):
             item = self.item(row, 4)
@@ -172,7 +167,7 @@ class SecureTable(QTableWidget):
                     item.setText("••••••••")
 
     def show_context_menu(self, pos):
-        """Req 2: Context menu"""
+        #контекстное меню
         item = self.itemAt(pos)
         if not item:
             return
@@ -192,7 +187,16 @@ class SecureTable(QTableWidget):
             if pass_data:
                 QApplication.clipboard().setText(pass_data)
 
-    def clear(self):
-        """Req 4: Performance optimization for clearing"""
-        self.setRowCount(0)
+    def secure_clear(self):
+        #удаление изз памяти
+        for row in self._password_data:
+            # заполнение 0
+            # удаление ссылки
+            self._password_data[row] = ""
+
         self._password_data.clear()
+        self.setRowCount(0)
+
+    def clear(self):
+        #очистка
+        self.secure_clear()

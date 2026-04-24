@@ -19,17 +19,17 @@ class EncryptionService:
         if not key:
             raise PermissionError("Хранилище заблокировано. Ключ недоступен.")
 
-        # Добавляем диагностику
-        print(f"[AES] Raw key from KeyManager: {key.hex()[:32] if key else 'None'}")
-        print(f"[AES] Raw key length: {len(key) if key else 0}")
+        # диагностика
+        #print(f"[AES] Raw key from KeyManager: {key.hex()[:32] if key else 'None'}")
+        #print(f"[AES] Raw key length: {len(key) if key else 0}")
 
-        # ВАЖНО: Если ключ уже 32 байта, возвращаем его как есть
+        # Если ключ уже 32 байта, осталяем  как есть
         if len(key) == 32:
-            print(f"[AES] Using raw key as is")
+            #print(f"[AES] Using raw key as is")
             return key
         else:
-            # Если длина отличается, деривируем через HKDF
-            print(f"[AES] Key length {len(key)} != 32, deriving via HKDF")
+            # Если длина отличается, проводим через HKDF
+            #print(f"[AES] Key length {len(key)} != 32, deriving via HKDF")
             hkdf = HKDF(
                 algorithm=hashes.SHA256(),
                 length=32,
@@ -38,13 +38,13 @@ class EncryptionService:
                 backend=default_backend()
             )
             derived = hkdf.derive(key)
-            print(f"[AES] Derived key: {derived.hex()[:32]}")
+            #print(f"[AES] Derived key: {derived.hex()[:32]}")
             return derived
 
     def encrypt_entry(self, entry_data: dict) -> bytes:
         # Упаковывает данные записи в JSON, добавляет метаданные и шифрует AES-256-GCM
 
-        # 1. Подготовка JSON полезной нагрузки
+        #  Подготовка JSON полезной нагрузки
         payload = {
             "version": 1,  # Версия формата
             "created_at": int(time.time()),  # Timestamp
@@ -53,13 +53,16 @@ class EncryptionService:
             "password": entry_data.get('password', ''),
             "url": entry_data.get('url', ''),
             "category": entry_data.get('category', 'Uncategorized'),
-            "notes": entry_data.get('notes', '')
+            "notes": entry_data.get('notes', ''),
+
+            "totp_secret": entry_data.get('totp_secret', ''),
+            "sharing_metadata": entry_data.get('sharing_metadata', {})
         }
 
         json_str = json.dumps(payload, ensure_ascii=False)
         plaintext = json_str.encode('utf-8')
 
-        # 2. Шифрование
+        # Шифрование
         key = self._get_aes_key()
         aesgcm = AESGCM(key)
 
@@ -67,7 +70,7 @@ class EncryptionService:
 
         ciphertext = aesgcm.encrypt(nonce, plaintext, None)
 
-        # 3. ВЕРИФИКАЦИЯ: Проверяем что можем расшифровать свои же данные
+        # верификация
         try:
             test_plain = aesgcm.decrypt(nonce, ciphertext, None)
             test_json = json.loads(test_plain.decode('utf-8'))
@@ -77,15 +80,15 @@ class EncryptionService:
             print(f"КРИТИЧЕСКАЯ ОШИБКА: Шифрование прошло, но расшифровка не удалась: {e}")
             raise RuntimeError("Encryption verification failed") from e
 
-        # Возвращаем raw bytes (nonce + ciphertext)
+        # Возвращаем байты
         return nonce + ciphertext
 
     def decrypt_entry(self, encrypted_data: bytes) -> dict:
         if not encrypted_data:
             return {}
 
-        print(f"[DECRYPT] Data type: {type(encrypted_data)}")
-        print(f"[DECRYPT] Data length: {len(encrypted_data)}")
+        #print(f"[DECRYPT] Data type: {type(encrypted_data)}")
+        #print(f"[DECRYPT] Data length: {len(encrypted_data)}")
 
         if len(encrypted_data) <= 12:
             raise ValueError(f"Invalid encrypted data length: {len(encrypted_data)}")
@@ -97,17 +100,17 @@ class EncryptionService:
             nonce = encrypted_data[:12]
             ciphertext = encrypted_data[12:]
 
-            print(f"[DECRYPT] Nonce hex: {nonce.hex()}")
-            print(f"[DECRYPT] Ciphertext length: {len(ciphertext)}")
+            #print(f"[DECRYPT] Nonce hex: {nonce.hex()}")
+            #print(f"[DECRYPT] Ciphertext length: {len(ciphertext)}")
 
             plaintext = aesgcm.decrypt(nonce, ciphertext, None)
             result = json.loads(plaintext.decode('utf-8'))
-            print(f"[DECRYPT] SUCCESS: {result.get('title')}")
+            #print(f"[DECRYPT] SUCCESS: {result.get('title')}")
             return result
 
         except InvalidTag as e:
-            print(f"[DECRYPT] InvalidTag error!")
-            print(f"[DECRYPT] Key hex first 16: {key.hex()[:32] if key else 'None'}")
+            #print(f"[DECRYPT] InvalidTag error!")
+            #print(f"[DECRYPT] Key hex first 16: {key.hex()[:32] if key else 'None'}")
             raise ValueError("Ошибка целостности данных") from e
 
     def encrypt(self, plaintext: str) -> str:
@@ -118,10 +121,10 @@ class EncryptionService:
         key = self._get_aes_key()
         aesgcm = AESGCM(key)
 
-        # Генерация случайного Nonce (12 байт - стандарт для GCM)
+        # Генерация случайного Nonce 
         nonce = os.urandom(12)
 
-        # Шифрование (plaintext в байты)
+        # Шифрование 
         ciphertext = aesgcm.encrypt(nonce, plaintext.encode('utf-8'), None)
 
         # Объединяем nonce и ciphertext и кодируем в base64 для хранения в БД

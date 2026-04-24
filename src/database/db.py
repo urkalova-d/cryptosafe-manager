@@ -10,7 +10,7 @@ class DatabaseHelper:
         self._lock = Lock()
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=20)
         self.conn.row_factory = sqlite3.Row
-        # --- NEW: Включаем режим WAL для многопоточности и оптимизации ---
+        #  режим WAL для многопоточности и оптимизации
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.init_db()
@@ -31,7 +31,7 @@ class DatabaseHelper:
                     tags TEXT
                 )
             """)
-            # Корзина
+            # корзина
             cursor.execute("""
                             CREATE TABLE IF NOT EXISTS deleted_entries (
                                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,7 +41,7 @@ class DatabaseHelper:
                                 expiration_timestamp TIMESTAMP
                             )
                         """)
-            #  История паролей
+            # история паролей
             cursor.execute("""
                            CREATE TABLE IF NOT EXISTS password_history (
                                id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,7 +83,6 @@ class DatabaseHelper:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_vault_updated_at ON vault_entries(updated_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_vault_tags ON vault_entries(tags)")
 
-            # --- NEW: Req 2. FTS5 Full-text search ---
             # Создаем виртуальную таблицу для поиска по тегам
             cursor.execute("""
                             CREATE VIRTUAL TABLE IF NOT EXISTS vault_entries_fts USING fts5(
@@ -184,7 +183,7 @@ class DatabaseHelper:
         return input_hash == stored_hash
 
     def add_entry(self, encrypted_data: bytes, tags: str = ""):
-        """Сохраняет зашифрованный JSON-блоб и метаданные."""
+        #Сохраняет зашифрованный JSON-блоб и метаданные
         with self._lock:
             try:
                 if not isinstance(encrypted_data, bytes):
@@ -221,7 +220,7 @@ class DatabaseHelper:
             return None
 
     def get_all_entries(self):
-        """Возвращает список словарей с id, зашифрованными данными и метаданными."""
+        #Возвращает список словарей с id, зашифрованными данными и метаданными
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute("SELECT id, encrypted_data, created_at, updated_at, tags FROM vault_entries")
@@ -242,7 +241,7 @@ class DatabaseHelper:
 
 
     def update_entry(self, entry_id: int, encrypted_data: bytes, tags: str = None):
-        """Обновление записи."""
+        #Обновление записи
         with self._lock:
             try:
                 if tags is not None:
@@ -263,13 +262,13 @@ class DatabaseHelper:
                 return False
 
     def delete_entry(self, entry_id: int):
-        """Удаление записи."""
+        #Удаление записи
         with self._lock:
             self.conn.execute("DELETE FROM vault_entries WHERE id = ?", (entry_id,))
             self.conn.commit()
 
     def add_password_to_history(self, password_hash: str):
-        """Добавляет хеш пароля в историю."""
+        #Добавляет хеш пароля в историю
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute("INSERT INTO password_history (password_hash) VALUES (?)", (password_hash,))
@@ -287,14 +286,14 @@ class DatabaseHelper:
             self.conn.commit()
 
     def is_password_in_history(self, password_hash: str) -> bool:
-        """Проверяет, был ли такой пароль недавно."""
+        #Проверяет, был ли такой пароль недавно
         with self._lock:
             cursor = self.conn.cursor()
             cursor.execute("SELECT id FROM password_history WHERE password_hash = ?", (password_hash,))
             return cursor.fetchone() is not None
 
     def rotate_vault_keys(self, new_master_hash, new_auth_salt, new_enc_salt, re_encrypted_data):
-        """Атомарное обновление при смене пароля."""
+        #Атомарное обновление при смене пароля
         with self._lock:
             try:
                 self.conn.execute("BEGIN TRANSACTION")
@@ -327,12 +326,12 @@ class DatabaseHelper:
                 raise e
 
     def soft_delete_entry(self, entry_id: int, expiration_days: int = 30):
-        """Перемещает запись в таблицу deleted_entries."""
+        #Перемещает запись в таблицу deleted_entrie
         with self._lock:
             try:
                 self.conn.execute("BEGIN TRANSACTION")
 
-                # 1. Получаем данные записи
+                # Получаем данные записи
                 cursor = self.conn.cursor()
                 cursor.execute("SELECT encrypted_data, created_at FROM vault_entries WHERE id = ?", (entry_id,))
                 row = cursor.fetchone()
@@ -342,14 +341,14 @@ class DatabaseHelper:
                 enc_data = row['encrypted_data']
                 orig_created = row['created_at']
 
-                # 2. Вставляем в deleted_entries
+                # Вставляем в deleted_entries
                 # Вычисляем дату автоматического удаления
                 self.conn.execute("""
                     INSERT INTO deleted_entries (id, encrypted_data, original_created_at, deleted_at, expiration_timestamp)
                     VALUES (?, ?, ?, datetime('now'), datetime('now', '+' || ? || ' days'))
                 """, (entry_id, enc_data, orig_created, expiration_days))
 
-                # 3. Удаляем из основной таблицы
+                #  Удаляем из основной таблицы
                 self.conn.execute("DELETE FROM vault_entries WHERE id = ?", (entry_id,))
 
                 self.conn.commit()
@@ -360,7 +359,7 @@ class DatabaseHelper:
                 raise e
 
     def hard_delete_entry(self, entry_id: int):
-        """Полное удаление из корзины."""
+        #Полное удаление из корзины
         with self._lock:
             self.conn.execute("DELETE FROM deleted_entries WHERE id = ?", (entry_id,))
             self.conn.commit()
@@ -368,8 +367,7 @@ class DatabaseHelper:
     def close(self):
         if hasattr(self, 'conn') and self.conn:
             self.conn.close()
-
-    # Добавь методы для работы с историей
+            
     def save_search_query(self, query_text: str):
         with self._lock:
             # Удаляем дубликат, если есть
@@ -387,6 +385,9 @@ class DatabaseHelper:
         with self._lock:
             cursor = self.conn.execute("SELECT query FROM search_history ORDER BY timestamp DESC")
             return [row['query'] for row in cursor.fetchall()]
+
+    def cleanup_expired_deleted(self):
+        self.conn.execute("DELETE FROM deleted_entries WHERE expiration_timestamp <= datetime('now')")
 
 
 

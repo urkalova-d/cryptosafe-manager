@@ -11,15 +11,13 @@ from thefuzz import fuzz
 
 
 class EntryManager(QObject):
-    """
-    Централизованный контроллер для операций CRUD (CRUD-1).
-    Управляет шифрованием, транзакциями и событиями.
-    """
-
-    # CRUD-3: События
-    EntryCreated = pyqtSignal(int)  # entry_id
-    EntryUpdated = pyqtSignal(int)  # entry_id
-    EntryDeleted = pyqtSignal(int)  # entry_id
+    #Централизованный контроллер для операций управляет шифрованием, транзакциями и событиями
+    #  события
+    EntryCreated = pyqtSignal(int)
+    EntryUpdated = pyqtSignal(int)
+    EntryDeleted = pyqtSignal(int)
+    # инткграция к 4 спринту
+    EntryCopied = pyqtSignal(int)
 
     def __init__(self, db_helper, key_manager):
         super().__init__()
@@ -27,41 +25,53 @@ class EntryManager(QObject):
         self.encryption = EncryptionService(key_manager)
 
     def create_entry(self, data: dict) -> int:
-        """
-        Создание новой записи.
-        Args:
-            data: dict с ключами service, username, password, url, category, notes
-        Returns:
-            entry_id (int)
-        """
-        try:
-            # 1. Шифруем данные
-            encrypted_blob = self.encryption.encrypt_entry(data)
+        #создание новой записи
 
-            # 2. Сохраняем в БД (теги берем из категории для поиска)
+        from src.core.events import event_bus, EventType
+        event_bus.publish(EventType.ENTRY_ADDED, entry_id)
+        try:
+            # пготовка данных
+            payload_data = {
+                "service": data.get('service', ''),
+                "username": data.get('username', ''),
+                "password": data.get('password', ''),
+                "url": data.get('url', ''),
+                "category": data.get('category', 'Uncategorized'),
+                "notes": data.get('notes', ''),
+
+                # интеграции на будущие спринты
+                "totp_secret": data.get('totp_secret', ''),
+                "sharing_metadata": data.get('sharing_metadata', {})
+            }
+
+            # шифрование данных
+            encrypted_blob = self.encryption.encrypt_entry(payload_data)
+
+            # сохраниев бд
             tags = data.get('category', '')
             entry_id = self.db.add_entry(encrypted_blob, tags=tags)
 
-            # 3. Публикуем событие
+            # интеграция на 5 спринт
+            self._log_audit_event("CREATE", entry_id)
+
+            #  Публикуем событие
             self.EntryCreated.emit(entry_id)
             return entry_id
 
         except Exception as e:
-            # CRUD-2: Обработка ошибок (транзакционность обеспечивается внутри db.add_entry)
             print(f"Error creating entry: {e}")
             raise e
-
     def get_entry(self, entry_id: int) -> dict:
-        """Получение и расшифровка одной записи."""
+        #Получение и расшифровка одной записи
         try:
             record = self.db.get_entry(entry_id)
             if not record:
-                raise ValueError("Запись не найдена")
+                raise ValueError("Entry not found")
 
-            # Расшифровываем
+            # расшифровка
             decrypted_data = self.encryption.decrypt_entry(record['encrypted_data'])
 
-            # Добавляем метаданные БД
+            # добавление метаданных в бд
             decrypted_data['id'] = record['id']
             decrypted_data['created_at'] = record['created_at']
             decrypted_data['updated_at'] = record['updated_at']
@@ -73,7 +83,7 @@ class EntryManager(QObject):
             raise e
 
     def get_all_entries(self) -> list[dict]:
-        """Получение списка всех записей (массив словарей)."""
+        #Получение списка всех записей
         try:
             records = self.db.get_all_entries()
             result = []
@@ -88,7 +98,7 @@ class EntryManager(QObject):
                     result.append(data)
                 except Exception as e:
                     print(f"Skipping corrupted entry {rec['id']}: {e}")
-                    # Можно добавить заглушку, чтобы не ломать список
+                    # заглушка что бы список не ломался
                     result.append({
                         'id': rec['id'],
                         'title': 'ERROR',
@@ -104,14 +114,27 @@ class EntryManager(QObject):
             raise e
 
     def update_entry(self, entry_id: int, data: dict) -> int:
-        """Обновление записи."""
+        #обновление записи
         try:
-            # Шифруем новые данные
-            encrypted_blob = self.encryption.encrypt_entry(data)
+            # Подготовка данных с интеграционными полями
+            payload_data = {
+                "service": data.get('service', ''),
+                "username": data.get('username', ''),
+                "password": data.get('password', ''),
+                "url": data.get('url', ''),
+                "category": data.get('category', 'Uncategorized'),
+                "notes": data.get('notes', ''),
+                "totp_secret": data.get('totp_secret', ''),
+                "sharing_metadata": data.get('sharing_metadata', {})
+            }
 
-            # Обновляем
+            encrypted_blob = self.encryption.encrypt_entry(payload_data)
+
             tags = data.get('category', '')
             self.db.update_entry(entry_id, encrypted_blob, tags=tags)
+
+            # интеграция на будущие спринты
+            self._log_audit_event("UPDATE", entry_id)
 
             self.EntryUpdated.emit(entry_id)
             return entry_id
@@ -120,19 +143,15 @@ class EntryManager(QObject):
             raise e
 
     def delete_entry(self, entry_id: int, soft_delete: bool = True):
-        """
-        Удаление записи.
-        Args:
-            entry_id: ID записи
-            soft_delete: Если True, переносит в deleted_entries (CRUD-4). Если False - удаляет совсем.
-        """
+        #удаление записи
         try:
             if soft_delete:
-                # Перемещаем в корзину
                 self.db.soft_delete_entry(entry_id)
             else:
-                # Полное удаление (из корзины)
                 self.db.hard_delete_entry(entry_id)
+
+            # интеграция на спринты
+            self._log_audit_event("DELETE", entry_id)
 
             self.EntryDeleted.emit(entry_id)
 
@@ -140,8 +159,27 @@ class EntryManager(QObject):
             print(f"Error deleting entry: {e}")
             raise e
 
+        # Sprint 4 Placeholder: Clipboard Integration
+    def copy_to_clipboard_secure(self, entry_id: int):
+        self.EntryCopied.emit(entry_id)
+        print(f"[Integration] EntryCopied signal emitted for ID {entry_id}")
+
+        #  Security: Constant-time algorithms
+
+    @staticmethod
+    def _secure_compare(a: str, b: str) -> bool:
+        """
+        Constant-time comparison to prevent timing attacks.
+        Uses hmac.compare_digest.
+        """
+        return hmac.compare_digest(a, b)
+
+    def _log_audit_event(self, action: str, entry_id: int):
+        # интеграция с журналом аудита 5 спринт
+        pass
+
     def _calculate_strength(self, password):
-        """Простая оценка силы пароля для фильтрации"""
+        # оценка силы пароля для фильтрации
         if not password: return 0
         score = 0
         if len(password) >= 8: score += 1
@@ -152,25 +190,19 @@ class EntryManager(QObject):
         return score
 
     def filter_entries(self, all_entries, query):
-        """
-        Part 8: Продвинутая фильтрация.
-        Поддерживает:
-        - field:value (title:google, user:admin)
-        - strength:weak/medium/strong
-        - нечеткий поиск
-        """
+        #Продвинутая фильтрация (нечеткий поиск, поиск через: фильтрация по силе пароля
         if not query:
             return all_entries
 
         query = query.lower().strip()
         filtered = []
 
-        # Разбор поискового запроса
-        # Извлекаем специальные фильтры
+        # разбор поискового запроса
+        # извлекаем специальные фильтры
         filters = {}
         text_query = query
 
-        # Простая реализация парсинга "key:value"
+        #  реализация "key:value"
         parts = query.split()
         clean_parts = []
 
@@ -184,19 +216,19 @@ class EntryManager(QObject):
             else:
                 clean_parts.append(part)
 
-        # Текст для полнотекстового поиска (все, что не key:value)
+        # поиск
         search_text_query = " ".join(clean_parts)
 
         for entry in all_entries:
             match = True
 
-            # 1. Применение фильтров (key:value)
+            #  применение фильтра key:value
             for key, val in filters.items():
                 entry_val = ""
 
-                # Маппинг полей
+                # отображение полей
                 if key in ["title", "service"]:
-                    entry_val = str(entry.get('service', ''))
+                    entry_val = str(entry.get('service', entry.get('title', '')))
                 elif key in ["user", "username"]:
                     entry_val = str(entry.get('username', ''))
                 elif key in ["url"]:
@@ -206,7 +238,7 @@ class EntryManager(QObject):
                 elif key in ["cat", "category"]:
                     entry_val = str(entry.get('category', ''))
                 elif key == "strength":
-                    # Специальный фильтр силы пароля
+                    #  фильтр силы пароля
                     pwd = entry.get('password', '')
                     strength_score = self._calculate_strength(pwd)
 
@@ -220,9 +252,9 @@ class EntryManager(QObject):
                         match = False
                     elif val == "weak" and not is_weak:
                         match = False
-                    continue  # Переходим к следующему фильтру
+                    continue  # переход к следующему фильтру
 
-                # Проверка вхождения (частичное совпадение)
+                # проверка на частичное совпадение
                 if val not in entry_val.lower():
                     match = False
                     break
@@ -230,16 +262,16 @@ class EntryManager(QObject):
             if not match:
                 continue
 
-            # 2. Полнотекстовый и нечеткий поиск
+            #  полнотекстовый и нечеткий поиск
             if search_text_query:
-                # Собираем строку для поиска
-                full_text = f"{entry.get('service', '')} {entry.get('username', '')} {entry.get('notes', '')} {entry.get('url', '')}".lower()
+                # сборка строкм для поиска
+                full_text = f"{entry.get('service', '')} {entry.get('title', '')} {entry.get('username', '')} {entry.get('notes', '')} {entry.get('url', '')}".lower()
 
-                # Точное вхождение
+                # точное нахождение
                 if search_text_query in full_text:
                     filtered.append(entry)
-                # Нечеткий поиск (терпимость к опечаткам)
-                elif fuzz.partial_ratio(search_text_query, full_text) > 75:  # Порог 75%
+                # нечеткий поиск 
+                elif fuzz.partial_ratio(search_text_query, full_text) > 75:  
                     filtered.append(entry)
             else:
                 # Если только фильтры без текста

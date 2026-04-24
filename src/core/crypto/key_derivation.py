@@ -32,13 +32,13 @@ class KeyDerivationService:
         self.pbkdf2_iterations = config.get('pbkdf2_iterations', 100000)
 
     def create_auth_hash(self, password: str) -> str:
-        """Создание хеша пароля через Argon2id"""
+        #Создание хеша пароля через Argon2id 
         return self.argon2_hasher.hash(password)
 
     def derive_encryption_key(self, password: str, salt: bytes) -> bytes:
-        """Генерация ключа шифрования через PBKDF2"""
-        print(f"[KDF] Password length: {len(password)}")
-        print(f"[KDF] Salt hex: {salt.hex()}")
+        #Генерация ключа шифрования через PBKDF2
+        #print(f"[KDF] Password length: {len(password)}")
+        #print(f"[KDF] Salt hex: {salt.hex()}")
 
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
@@ -52,7 +52,7 @@ class KeyDerivationService:
         return result
 
     def derive_auth_key(self, password: str, salt: bytes) -> bytes:
-        """Генерация ключа аутентификации через Argon2id (ДОБАВЛЕНО)"""
+        #Генерация ключа аутентификации через Argon2id 
         from argon2.low_level import hash_secret_raw
 
         # Используем низкоуровневый API Argon2 для получения сырых байтов
@@ -68,11 +68,11 @@ class KeyDerivationService:
         return raw_hash
 
     def generate_auth_key(self, password: str, salt: bytes) -> bytes:
-        """Алиас для derive_auth_key (для обратной совместимости)"""
+        #Алиас для derive_auth_key  
         return self.derive_auth_key(password, salt)
 
     def derive_special_key(self, master_key: bytes, purpose: str, salt: bytes = None) -> bytes:
-        """Генерация специализированных ключей на основе мастер-ключа"""
+        #Генерация специализированных ключей на основе мастер-ключа 
         if salt is None:
             # фиксированная соль в рамках сессии
             salt = b'cryptosafe_special_salt_v1'
@@ -87,7 +87,7 @@ class KeyDerivationService:
         return hkdf.derive(master_key)
 
     def verify_password(self, password: str, stored_hash: str) -> bool:
-        """Проверка пароля через Argon2id"""
+        #Проверка пароля через Argon2id 
         try:
             return self.argon2_hasher.verify(stored_hash, password)
         except Exception:
@@ -97,7 +97,7 @@ class KeyDerivationService:
 
     @staticmethod
     def validate_password_strength(password: str) -> tuple[bool, str]:
-        """Валидация сложности пароля"""
+        #Валидация сложности пароля 
         if len(password) < 12:
             return False, "Пароль должен быть не менее 12 символов."
         if not re.search(r"[a-z]", password):

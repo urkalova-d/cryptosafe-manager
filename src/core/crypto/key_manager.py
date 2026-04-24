@@ -17,7 +17,7 @@ class KeyManager:
         return self.kdf.verify_password(password, stored_hash)
 
     def setup_new_user(self, password: str):
-        """Настройка нового пользователя"""
+        #Настройка нового пользователя 
         is_valid, message = self.kdf.validate_password_strength(password)
         if not is_valid:
             raise ValueError(f"Ненадежный пароль: {message}")
@@ -88,7 +88,7 @@ class KeyManager:
             return False
 
     def get_special_key(self, purpose: str) -> bytes:
-        """Возвращает специализированный ключ"""
+        #Возвращает специализированный ключ 
         master_key = self.storage.get_enc_key()
         if not master_key:
             raise PermissionError("Хранилище заблокировано.")
@@ -104,17 +104,15 @@ class KeyManager:
         return self.get_special_key("totp_derivation")
 
     def rotate_keys(self, old_password, new_password, progress_callback=None):
-        """
-        Ротация ключей при смене пароля.
-        ИСПРАВЛЕНО: Правильное перешифрование без потери данных.
-        """
+        #Ротация ключей при смене пароля.
+         
         try:
-            # 1. Проверка старого пароля
+            #  Проверка старого пароля
             stored_hash = self.db.get_setting("master_hash")
             if not self.kdf.verify_password(old_password, stored_hash):
                 return False
 
-            # 2. Получаем старые соли и ключи
+            #  Получаем старые соли и ключи
             old_enc_salt, _ = self.db.get_key_store("encryption_salt")
             if not old_enc_salt:
                 print("Ошибка: encryption_salt не найден")
@@ -123,15 +121,13 @@ class KeyManager:
             # Деривируем старый ключ (НЕ сохраняем в storage!)
             old_enc_key = self.kdf.derive_encryption_key(old_password, old_enc_salt)
 
-            # 3. Генерируем новые соли и ключи
+            # Генерируем новые соли и ключи
             new_auth_salt = secrets.token_bytes(16)
             new_enc_salt = secrets.token_bytes(16)
             new_enc_key = self.kdf.derive_encryption_key(new_password, new_enc_salt)
             new_master_hash = self.kdf.create_auth_hash(new_password)
 
-            # 4. Перешифрование данных
-            # ВАЖНО: Используем старый ключ напрямую, а не через EncryptionService
-            # который берет ключ из storage
+            #   Перешифрование данных
             records = self.db.get_all_entries()
             total = len(records)
             re_encrypted_list = []
@@ -166,7 +162,7 @@ class KeyManager:
                 if progress_callback:
                     progress_callback(int((i + 1) / total * 100) if total > 0 else 100)
 
-            # 5. Сохраняем в БД
+            #  Сохраняем в БД
             self.db.rotate_vault_keys(
                 new_master_hash,
                 new_auth_salt,
@@ -174,7 +170,7 @@ class KeyManager:
                 re_encrypted_list
             )
 
-            # 6. ОБНОВЛЯЕМ storage ТОЛЬКО после успешного сохранения
+            # обновление storage только после успешного сохранения
             self.storage.set_keys(b"", new_enc_key)
 
             return True

@@ -7,12 +7,11 @@ from PyQt6.QtGui import QIcon, QPixmap
 from urllib.parse import urlparse
 from src.core.vault.password_generator import PasswordGenerator
 
-# Импорт для загрузки через requests
 import requests
 
 
 class FaviconWorker(QThread):
-    """Поток для загрузки фавиконки"""
+    #поток для загрузки 
     finished = pyqtSignal(QPixmap)
 
     def __init__(self, url):
@@ -41,15 +40,14 @@ class AddRecordWindow(QDialog):
         self.setWindowTitle("Добавить запись")
         self.setMinimumWidth(500)
 
-        # Флаг для предотвращения рекурсии
         self._is_updating_url = False
 
         layout = QVBoxLayout()
         form = QFormLayout()
 
-        # --- Поля ввода ---
+        # поля ввода
 
-        # Сервис (с местом под иконку)
+        # Сервис с местом под иконку
         service_layout = QHBoxLayout()
         self.icon_label = QLabel()
         self.icon_label.setFixedSize(24, 24)
@@ -59,27 +57,27 @@ class AddRecordWindow(QDialog):
         service_layout.addWidget(self.service)
         form.addRow("Сервис:", service_layout)
 
-        # URL (с валидацией)
+        # URL с валидацией
         self.url = QLineEdit()
         self.url.textChanged.connect(self.on_url_changed)
         form.addRow("URL:", self.url)
 
-        # Логин (с автозаполнением)
+        # ногин с автозаполнением
         self.login = QLineEdit()
         form.addRow("Логин:", self.login)
 
-        # Категория
+        # категории
         self.category = QComboBox()
         self.category.addItems(["Uncategorized", "Work", "Personal", "Finance", "Social", "Development"])
         self.category.setEditable(True)
         form.addRow("Категория:", self.category)
 
-        # Пароль
+        # пароль
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.password.textChanged.connect(self.update_strength_indicator)
 
-        # Метка силы
+        # метка силы
         self.strength_label = QLabel("")
         self.strength_label.setStyleSheet("font-size: 10px;")
 
@@ -88,13 +86,13 @@ class AddRecordWindow(QDialog):
         pass_layout.addWidget(self.strength_label)
         form.addRow("Пароль:", pass_layout)
 
-        # Заметки
+        # заметки
         self.notes = QLineEdit()
         form.addRow("Заметки:", self.notes)
 
         layout.addLayout(form)
 
-        # --- Кнопки ---
+        # кнопки
 
         btn_layout = QHBoxLayout()
 
@@ -117,30 +115,27 @@ class AddRecordWindow(QDialog):
         self.setLayout(layout)
 
     def on_url_changed(self, text):
-        """Req 3: Auto-fill username based on domain patterns"""
-
-        # ЗАЩИТА ОТ РЕКУРСИИ: Если мы сейчас сами меняем текст, выходим
+        # защита от рекурсии
         if self._is_updating_url:
             return
 
         domain = self._extract_domain(text)
 
-        # Автозаполнение логина, только если он пуст
+        # автозаполнение логина, только если он пуст
         if domain and not self.login.text():
             default_login = f"user@{domain}"
             self.login.setText(default_login)
-            # УБРАНО: self.login.setFocus() - это вызывало перескок фокуса
 
         # Загрузка фавиконки
         self.load_favicon(text)
 
     def load_favicon(self, url):
-        """Асинхронная загрузка фавиконки"""
+        #fсинхронная загрузка
         domain = self._extract_domain(url)
         if domain:
             favicon_url = f"https://www.google.com/s2/favicons?domain={domain}&sz=32"
             if hasattr(self, 'worker') and self.worker.isRunning():
-                self.worker.terminate()  # Останавливаем предыдущий запрос
+                self.worker.terminate()  # остановка предыдущего запроса
 
             self.worker = FaviconWorker(favicon_url)
             self.worker.finished.connect(self.set_icon)
@@ -154,7 +149,7 @@ class AddRecordWindow(QDialog):
 
     def _extract_domain(self, url):
         try:
-            # Если протокол не указан, добавляем http для парсинга
+            #  добавление http для парсинга
             if not url.startswith(('http://', 'https://')):
                 url = 'http://' + url
             parsed = urlparse(url)
@@ -163,7 +158,7 @@ class AddRecordWindow(QDialog):
             return ""
 
     def show_config_popup(self):
-        """Req 1: Configuration popup"""
+        #
         dialog = QDialog(self)
         dialog.setWindowTitle("Настройки генерации")
         layout = QVBoxLayout(dialog)
@@ -244,7 +239,7 @@ class AddRecordWindow(QDialog):
         self.strength_label.setStyleSheet(f"color: {color}; font-weight: bold;")
 
     def save(self):
-        """Req 2: Form validation"""
+        #формирование валидации
         service = self.service.text().strip()
         pwd = self.password.text()
         url = self.url.text().strip()
@@ -253,9 +248,9 @@ class AddRecordWindow(QDialog):
             QMessageBox.warning(self, "Ошибка", "Название сервиса обязательно!")
             return
 
-        # Проверка URL
+        # проверка URL
         if url:
-            # Авто-исправление: добавляем https если нет протокола
+            # автоисправление
             if not url.startswith(('http://', 'https://')):
                 url = 'https://' + url
 
@@ -264,7 +259,7 @@ class AddRecordWindow(QDialog):
                 QMessageBox.warning(self, "Ошибка", "Некорректный формат URL.")
                 return
 
-        # Проверка силы пароля
+        # проверка силы пароля
         valid, msg = PasswordGenerator.validate_password_strength(pwd)
         if not valid:
             reply = QMessageBox.question(self, "Слабый пароль",
@@ -277,7 +272,7 @@ class AddRecordWindow(QDialog):
             service,
             self.login.text(),
             pwd,
-            url,  # Отправляем исправленный URL
+            url,  # отображение исправлненого урл
             self.category.currentText(),
             self.notes.text()
         )
