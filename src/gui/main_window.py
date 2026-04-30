@@ -2,7 +2,7 @@ import sys
 import time
 import traceback
 from PyQt6.QtGui import QAction
-from PyQt6.QtCore import QSettings, QStringListModel  # --- NEW: для истории поиска ---
+from PyQt6.QtCore import QSettings, QStringListModel
 
 from src.database.db import DatabaseHelper
 from src.gui.setup_wizard import SetupWizard
@@ -13,7 +13,7 @@ from PyQt6.QtCore import Qt, QTimer, QEvent, QObject, pyqtSignal, QThread
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox,
                              QTableWidget, QApplication, QTableWidgetItem, QHeaderView,
                              QMenuBar, QMenu, QStatusBar, QToolBar, QLabel,
-                             QProgressDialog, QLineEdit, QCompleter)  # --- NEW: QCompleter ---
+                             QProgressDialog, QLineEdit, QCompleter)
 from src.core.crypto.key_manager import KeyManager
 from src.core.crypto.authentication import AuthenticationService
 from src.core.vault.encryption_service import EncryptionService
@@ -137,9 +137,6 @@ class MainWindow(QMainWindow):
 
         self.statusBar().showMessage("Вы успешно вошли в систему")
 
-
-
-
     def on_user_logged_out(self):
         # для события выхода
         print("Событие: UserLoggedOut")
@@ -198,7 +195,7 @@ class MainWindow(QMainWindow):
         add_action.triggered.connect(self.open_add_window)
         toolbar.addAction(add_action)
 
-        # --- Req 3: Global Toggle ---
+        # глобальный переключатель
         self.toggle_pass_action = QAction("Показать пароли", self)
         self.toggle_pass_action.setCheckable(True)
         self.toggle_pass_action.toggled.connect(self.toggle_password_visibility)
@@ -207,7 +204,7 @@ class MainWindow(QMainWindow):
         # Добавляем спейсер или просто следующую кнопку
         toolbar.addSeparator()
 
-         #поиск
+        # поиск
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Поиск (title:work, user:admin)...")
         self.search_bar.setFixedWidth(250)
@@ -226,8 +223,6 @@ class MainWindow(QMainWindow):
 
         toolbar.addWidget(QLabel("  Поиск: "))
         toolbar.addWidget(self.search_bar)
-
-
 
     def toggle_password_visibility(self, checked):
         #показ паролей
@@ -248,22 +243,38 @@ class MainWindow(QMainWindow):
         self.table = SecureTable()
         self.main_layout.addWidget(self.table)
 
-    def copy_to_clipboard(self, password):
-        from PyQt6.QtWidgets import QApplication
+        # сигналы контекстного меню
+        self.table.edit_requested.connect(self.edit_entry_by_id)
+        self.table.delete_requested.connect(self.delete_entry_by_id)
+        self.table.copy_requested.connect(self.copy_to_clipboard)
 
-        # роверка,что пароль дошел до функции
-        if not password or password == "****":
-            print("Ошибка: Пароль пуст или замаскирован")
+    def copy_to_clipboard(self, entry_id):
+        #Получает пароль по ID только в момент копирования.
+        
+        if not entry_id:
             return
+        try:
+            #  Расшифровка происходит только сейчас, данные не висят в памяти
+            entry_data = self.entry_manager.get_entry(entry_id)
+            password = entry_data.get('password', '')
 
-        clipboard = QApplication.clipboard()
-        clipboard.setText(password)
+            if not password:
+                self.statusBar().showMessage("Пароль пуст", 3000)
+                return
 
-        self.statusBar().showMessage("Пароль скопирован в буфер!", 5000)
+            clipboard = QApplication.clipboard()
+            clipboard.setText(password)
+            self.statusBar().showMessage("Пароль скопирован в буфер!", 5000)
 
-        # если есть таймер то запуск
-        if hasattr(self, 'start_clipboard_timer'):
-            self.start_clipboard_timer(30)
+            # Публикация события для интеграции 4 спринта
+            self.entry_manager.copy_to_clipboard_secure(entry_id)
+
+            if hasattr(self, 'start_clipboard_timer'):
+                self.start_clipboard_timer(30)
+
+        except Exception as e:
+            print(f"Ошибка при копировании: {e}")
+            QMessageBox.critical(self, "Ошибка", "Не удалось скопировать пароль")
 
     def create_status_bar(self):
         self.status_bar = self.statusBar()
@@ -411,68 +422,78 @@ class MainWindow(QMainWindow):
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка БД", f"Не удалось сохранить: {e}")
 
+    def get_password_for_entry(self, entry_id: int) -> str:
+        #геттер пароля для виджета таблицы
+        
+        if not entry_id:
+            return ""
+        try:
+            # Расшифровка происходит только здесь 
+            entry_data = self.entry_manager.get_entry(entry_id)
+            return entry_data.get('password', '')
+        except Exception as e:
+            print(f"Secure getter error: {e}")
+            return "ERROR"
     def load_data_from_db(self):
         try:
             self.table.setRowCount(0)
-
-            # Получение списка BLOB-ов из БД
             records = self.db_helper.get_all_entries()
             if not records:
                 self.statusBar().showMessage("База данных пуста", 5000)
-                #очистка кэша если пусто
                 self.all_records_cache = []
                 return
 
             if not self.key_manager.get_encryption_key():
                 return
 
-            #  список для кэша
             cache_list = []
 
             for rec in records:
                 enc_blob = rec.get('encrypted_data')
-
                 try:
-                    # Расшифровка JSON
                     data = self.encryption_service.decrypt_entry(enc_blob)
 
-                    # Извлечение поля
                     service_name = data.get('title', 'Unknown')
                     username = data.get('username', '')
                     category = data.get('category', 'Uncategorized')
-                    password = data.get('password', '')
                     notes = data.get('notes', '')
                     url = data.get('url', '')
                     rec_id = rec.get('id')
                     modified = rec.get('updated_at', '')
 
-                    # добавление в кэш
-                    cache_entry = data.copy()
-                    cache_entry['id'] = rec_id
-                    cache_entry['created_at'] = rec.get('created_at')
-                    cache_entry['updated_at'] = modified
+                    #  Кэшируем только метаданные
+                    cache_entry = {
+                        'id': rec_id,
+                        'service': service_name,
+                        'title': service_name,
+                        'username': username,
+                        'url': url,
+                        'category': category,
+                        'notes': notes,
+                        'created_at': rec.get('created_at'),
+                        'updated_at': modified,
+                    }
                     cache_list.append(cache_entry)
 
-                    #добавление записи
+                    # Передаем в таблицу плейсхолдер.
                     self.table.add_record(
                         service_name,
                         username,
                         category,
-                        password,
+                        "••••••••",
                         notes,
                         self.copy_to_clipboard,
                         record_id=rec_id,
                         modified_date=modified,
-                        url=url
+                        url=url,
+                        password_getter=self.get_password_for_entry  # Передаем функцию
                     )
                 except ValueError as ve:
-                    self.table.add_record("ОШИБКА ЦЕЛОСТНОСТИ", "", "", "", str(ve), None)
+                    self.table.add_record("ОШИБКА", "", "", "", str(ve), None)
                 except Exception as e:
                     print(f"Ошибка обработки записи: {e}")
 
-            #  сохрание кэша
             self.all_records_cache = cache_list
-
             self.statusBar().showMessage(f"Загружено записей: {len(records)}", 5000)
 
         except Exception as e:
@@ -665,10 +686,6 @@ class MainWindow(QMainWindow):
         item = self.table.item(selected_row, 0)
         entry_id = item.data(Qt.ItemDataRole.UserRole)
 
-        entry_raw = self.db_helper.get_entry(entry_id)
-        if not entry_raw:
-            return
-
         # загрузка данных  из менеджера
         entry_data = self.entry_manager.get_entry(entry_id)
 
@@ -678,10 +695,17 @@ class MainWindow(QMainWindow):
         edit_win.setWindowTitle("Редактировать запись")
 
         # Заполнение поля старыми данными
-        edit_win.service.setText(entry_data.get('service', ''))
+        service_name = entry_data.get('title', entry_data.get('service', ''))
+        edit_win.service.setText(service_name)
         edit_win.login.setText(entry_data.get('username', ''))
         edit_win.password.setText(entry_data.get('password', ''))
         edit_win.notes.setText(entry_data.get('notes', ''))
+        edit_win.url.setText(entry_data.get('url', ''))
+
+        # Устанавливаем категорию
+        idx = edit_win.category.findText(entry_data.get('category', ''))
+        if idx >= 0:
+            edit_win.category.setCurrentIndex(idx)
 
         # Переподключение сигнала сохранения на handle_update
         try:
@@ -691,10 +715,51 @@ class MainWindow(QMainWindow):
 
         # Подключаем к обработчику ОБНОВЛЕНИЯ, а не создания
         edit_win.record_saved.connect(
-            lambda s, l, p, n: self.handle_update(entry_id, s, l, p, n)
+            lambda s, l, p, u, c, n: self.handle_update(entry_id, s, l, p, u, c, n)
         )
 
         edit_win.exec()
+
+    def edit_entry_by_id(self, entry_id):
+        #Слот для сигнала edit_requested из таблицы
+        entry_data = self.entry_manager.get_entry(entry_id)
+
+        from src.gui.add_record_window import AddRecordWindow
+        edit_win = AddRecordWindow(self.db_helper, self)
+        edit_win.setWindowTitle("Редактировать запись")
+
+        service_name = entry_data.get('title', entry_data.get('service', ''))
+        edit_win.service.setText(service_name)
+        edit_win.login.setText(entry_data.get('username', ''))
+        edit_win.password.setText(entry_data.get('password', ''))
+        edit_win.notes.setText(entry_data.get('notes', ''))
+        edit_win.url.setText(entry_data.get('url', ''))
+
+        idx = edit_win.category.findText(entry_data.get('category', ''))
+        if idx >= 0: edit_win.category.setCurrentIndex(idx)
+
+        try:
+            edit_win.record_saved.disconnect()
+        except TypeError:
+            pass
+
+        edit_win.record_saved.connect(
+            lambda s, l, p, u, c, n: self.handle_update(entry_id, s, l, p, u, c, n)
+        )
+        edit_win.exec()
+
+    def delete_entry_by_id(self, entry_id):
+        #Слот для сигнала delete_requested из таблицы
+        reply = QMessageBox.question(self, "Подтверждение",
+                                     "Вы уверены, что хотите переместить запись в корзину?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self.entry_manager.delete_entry(entry_id, soft_delete=True)
+                self.statusBar().showMessage("Запись перемещена в корзину", 5000)
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось удалить: {e}")
 
     def handle_update(self, entry_id, service, login, password, url, category, notes):
         try:
@@ -709,51 +774,34 @@ class MainWindow(QMainWindow):
 
     #  поиск и фильтрация
     def run_search(self):
-        #поиск в реальном времени
         query = self.search_bar.text()
-
         if not self.all_records_cache:
             return
 
-        # Фильтр данных из кэша
         filtered = self.entry_manager.filter_entries(self.all_records_cache, query)
-
-        if hasattr(self.table, 'display_data'):
-            self.table.display_data(filtered, self.copy_to_clipboard)
-        else:
-            # ручное обновление
-            self.table.setRowCount(0)
-            for rec in filtered:
-                self.table.add_record(
-                    rec.get('service', ''),
-                    rec.get('username', ''),
-                    rec.get('category', 'Uncategorized'),
-                    rec.get('password', ''),
-                    rec.get('notes', ''),
-                    self.copy_to_clipboard,
-                    rec.get('id'),
-                    rec.get('updated_at', ''),
-                    rec.get('url', '')
-                )
+        self.table.display_data(filtered, self.copy_to_clipboard, self.get_password_for_entry)
 
         if query:
             self.statusBar().showMessage(f"Найдено результатов: {len(filtered)}", 3000)
 
     def save_search_history(self):
-        #сохранение последних 10 поисеов
+        # Сохранение в БД для аудита
         query = self.search_bar.text().strip()
         if not query:
             return
 
-        history = self.settings.value("search_history", [], type=list)
+        # Сохраняем в БД для интеграции с Audit Log на 5 спринт
+        try:
+            self.db_helper.save_search_query(query)
+        except Exception as e:
+            print(f"Ошибка сохранения истории поиска в БД: {e}")
 
-        # удаление дубликатов и добавление в начало 
+        # Также сохраняем в QSettings для UI автодополнения
+        history = self.settings.value("search_history", [], type=list)
         if query in history:
             history.remove(query)
         history.insert(0, query)
-
         history = history[:10]
-
         self.settings.setValue("search_history", history)
 
         # Обновляем модель комплетера

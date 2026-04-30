@@ -1,3 +1,4 @@
+import re  # Добавлен импорт для регулярных выражений
 from PyQt6.QtWidgets import (QDialog, QFormLayout, QLineEdit, QPushButton,
                              QVBoxLayout, QHBoxLayout, QMessageBox, QComboBox,
                              QLabel, QMenu, QCheckBox, QSpinBox, QWidget)
@@ -11,7 +12,7 @@ import requests
 
 
 class FaviconWorker(QThread):
-    #поток для загрузки 
+    # поток для загрузки
     finished = pyqtSignal(QPixmap)
 
     def __init__(self, url):
@@ -130,7 +131,7 @@ class AddRecordWindow(QDialog):
         self.load_favicon(text)
 
     def load_favicon(self, url):
-        #fсинхронная загрузка
+        # fсинхронная загрузка
         domain = self._extract_domain(url)
         if domain:
             favicon_url = f"https://www.google.com/s2/favicons?domain={domain}&sz=32"
@@ -224,12 +225,13 @@ class AddRecordWindow(QDialog):
 
         score = 0
         try:
-            from src.core.vault.password_generator import ZXCVBN_AVAILABLE
-            if ZXCVBN_AVAILABLE:
+            # Проверка доступности через модуль, а не атрибут класса
+            try:
                 from zxcvbn import zxcvbn
                 res = zxcvbn(text)
                 score = res['score']
-            else:
+            except ImportError:
+                # если библиотеки нет, простая оценка по длине
                 score = 4 if len(text) >= 16 else 2
         except:
             score = 0
@@ -239,40 +241,57 @@ class AddRecordWindow(QDialog):
         self.strength_label.setStyleSheet(f"color: {color}; font-weight: bold;")
 
     def save(self):
-        #формирование валидации
+        # реализация строгой валидации формы
+
         service = self.service.text().strip()
         pwd = self.password.text()
         url = self.url.text().strip()
 
+        #обязательные поля
         if not service:
-            QMessageBox.warning(self, "Ошибка", "Название сервиса обязательно!")
+            QMessageBox.warning(self, "Ошибка валидации", "Поле 'Сервис' обязательно для заполнения.")
             return
 
-        # проверка URL
+        if not pwd:
+            QMessageBox.warning(self, "Ошибка валидации", "Поле 'Пароль' обязательно для заполнения.")
+            return
+
+        # URL
         if url:
-            # автоисправление
+            check_url = url
             if not url.startswith(('http://', 'https://')):
-                url = 'https://' + url
+                check_url = 'https://' + url
 
-            qurl = QUrl(url)
-            if not qurl.isValid():
-                QMessageBox.warning(self, "Ошибка", "Некорректный формат URL.")
+            domain_regex = re.compile(
+                r'^(https?://)?'  
+                r'((([a-z\d]([a-z\d-]*[a-z\d])*)\.)+[a-z]{2,}|'  
+                r'((\d{1,3}\.){3}\d{1,3})|'  
+                r'localhost)'  
+                r'(:\d+)?'  
+                r'(/.*)?$', re.IGNORECASE)
+
+            if not domain_regex.match(check_url):
+                QMessageBox.warning(self, "Ошибка валидации",
+                                    "Некорректный формат URL.\nПример: https://example.com")
                 return
+            url = check_url
 
-        # проверка силы пароля
-        valid, msg = PasswordGenerator.validate_password_strength(pwd)
-        if not valid:
-            reply = QMessageBox.question(self, "Слабый пароль",
-                                         f"{msg}\n\nВсе равно сохранить?",
-                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            if reply == QMessageBox.StandardButton.No:
-                return
+        #  сила пароля
+        is_valid_strength, msg = PasswordGenerator.validate_password_strength(pwd)
 
+        if not is_valid_strength:
+            # Если пароль слабый, показываем ошибку и не даем сохранить
+            QMessageBox.critical(self, "Слабый пароль",
+                                 f"Пароль не соответствует требованиям безопасности:\n{msg}\n\n"
+                                 "Пожалуйста, используйте генератор или придумайте надежный пароль.")
+            return
+
+        # Если все проверки пройдены
         self.record_saved.emit(
             service,
             self.login.text(),
             pwd,
-            url,  # отображение исправлненого урл
+            url,
             self.category.currentText(),
             self.notes.text()
         )

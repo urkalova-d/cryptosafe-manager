@@ -104,7 +104,7 @@ class KeyManager:
         return self.get_special_key("totp_derivation")
 
     def rotate_keys(self, old_password, new_password, progress_callback=None):
-        #Ротация ключей при смене пароля.
+        #Ротация ключей при смене пароля
          
         try:
             #  Проверка старого пароля
@@ -112,16 +112,16 @@ class KeyManager:
             if not self.kdf.verify_password(old_password, stored_hash):
                 return False
 
-            #  Получаем старые соли и ключи
+            #  Получаение старой соли и ключей
             old_enc_salt, _ = self.db.get_key_store("encryption_salt")
             if not old_enc_salt:
                 print("Ошибка: encryption_salt не найден")
                 return False
 
-            # Деривируем старый ключ (НЕ сохраняем в storage!)
+            # Деривируем старый ключ
             old_enc_key = self.kdf.derive_encryption_key(old_password, old_enc_salt)
 
-            # Генерируем новые соли и ключи
+            # Генерирование новой соли и ключей
             new_auth_salt = secrets.token_bytes(16)
             new_enc_salt = secrets.token_bytes(16)
             new_enc_key = self.kdf.derive_encryption_key(new_password, new_enc_salt)
@@ -132,7 +132,7 @@ class KeyManager:
             total = len(records)
             re_encrypted_list = []
 
-            # Создаем AESGCM объекты напрямую с ключами
+            # Создание AESGCM объекты напрямую с ключами
             from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
             old_aesgcm = AESGCM(old_enc_key)

@@ -141,7 +141,6 @@ class DatabaseHelper:
         if not self.get_setting("kdf_salt"):
             print("Запуск миграции БД на новую систему ключей...")
 
-
     def save_setting(self, key, value):
         with self._lock:
             self.conn.execute("INSERT OR REPLACE INTO settings (setting_key, setting_value) VALUES (?, ?)",
@@ -164,6 +163,7 @@ class DatabaseHelper:
         # сохранение хеш строки
         #self.save_setting("master_hash", master_hash)
         pass
+
     def verify_master_password(self, password):
         #проверка мастер пароля
         from src.core.crypto.key_derivation import KeyDerivationService
@@ -238,7 +238,6 @@ class DatabaseHelper:
                 row_dict['tags'] = row['tags']
                 result.append(row_dict)
             return result
-
 
     def update_entry(self, entry_id: int, encrypted_data: bytes, tags: str = None):
         #Обновление записи

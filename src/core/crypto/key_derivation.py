@@ -17,7 +17,7 @@ class KeyDerivationService:
 
         # параметры Argon2id
         self.argon2_time = config.get('argon2_time', 3)
-        self.argon2_memory = config.get('argon2_memory', 65536)  # 64 MiB
+        self.argon2_memory = config.get('argon2_memory', 65536)  
         self.argon2_parallelism = config.get('argon2_parallelism', 4)
 
         self.argon2_hasher = PasswordHasher(

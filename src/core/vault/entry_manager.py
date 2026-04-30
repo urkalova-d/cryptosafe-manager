@@ -8,6 +8,7 @@ from .encryption_service import EncryptionService
 from .password_generator import PasswordGenerator
 
 from thefuzz import fuzz
+import hmac 
 
 
 class EntryManager(QObject):
@@ -25,10 +26,8 @@ class EntryManager(QObject):
         self.encryption = EncryptionService(key_manager)
 
     def create_entry(self, data: dict) -> int:
-        #создание новой записи
+        # создание новой записи
 
-        from src.core.events import event_bus, EventType
-        event_bus.publish(EventType.ENTRY_ADDED, entry_id)
         try:
             # пготовка данных
             payload_data = {
@@ -49,6 +48,7 @@ class EntryManager(QObject):
 
             # сохраниев бд
             tags = data.get('category', '')
+            # Правильное сохранение: передаем зашифрованный BLOB и теги
             entry_id = self.db.add_entry(encrypted_blob, tags=tags)
 
             # интеграция на 5 спринт
@@ -61,6 +61,7 @@ class EntryManager(QObject):
         except Exception as e:
             print(f"Error creating entry: {e}")
             raise e
+
     def get_entry(self, entry_id: int) -> dict:
         #Получение и расшифровка одной записи
         try:
@@ -168,10 +169,6 @@ class EntryManager(QObject):
 
     @staticmethod
     def _secure_compare(a: str, b: str) -> bool:
-        """
-        Constant-time comparison to prevent timing attacks.
-        Uses hmac.compare_digest.
-        """
         return hmac.compare_digest(a, b)
 
     def _log_audit_event(self, action: str, entry_id: int):
