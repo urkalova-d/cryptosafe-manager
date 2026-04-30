@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox,
 from src.core.crypto.key_manager import KeyManager
 from src.core.crypto.authentication import AuthenticationService
 from src.core.vault.encryption_service import EncryptionService
-
+from src.core.clipboard import ClipboardService, PlatformAdapter, ClipboardMonitor
 
 class LoadDataWorker(QObject):
     # Сигнал передает список расшифрованных записей
@@ -48,11 +48,6 @@ class MainWindow(QMainWindow):
         self.db_helper = db_manager
         self.current_master_password = None
 
-        # таймер
-        self.clipboard_timer = QTimer()
-        self.clipboard_timer.timeout.connect(self.update_timer_label)
-        self.remaining_time = 0
-
         # кр
         self.key_manager = KeyManager(self.db_helper)
 
@@ -64,6 +59,18 @@ class MainWindow(QMainWindow):
         self.entry_manager.EntryCreated.connect(self.on_entry_created)
         self.entry_manager.EntryUpdated.connect(self.on_entry_updated)
         self.entry_manager.EntryDeleted.connect(self.on_entry_deleted)
+
+        from src.core.clipboard import ClipboardService, PlatformAdapter, ClipboardMonitor
+        self.platform_adapter = PlatformAdapter()
+        self.clipboard_monitor = ClipboardMonitor(self.platform_adapter)
+        self.clipboard_service = ClipboardService(self.platform_adapter, self.clipboard_monitor)
+
+        # Подключение сигналов сервиса к UI
+        self.clipboard_service.timer_updated.connect(self.update_timer_label_service)
+        self.clipboard_service.clipboard_cleared.connect(self.on_clipboard_cleared)
+
+        # Запуск мониторинга буфера
+        self.clipboard_monitor.start_monitoring()
 
         self.auth_service = AuthenticationService(self.key_manager, self.db_helper, timeout_seconds=3600)
         self.encryption_service = EncryptionService(self.key_manager)
@@ -101,7 +108,6 @@ class MainWindow(QMainWindow):
         self.create_toolbar()
         self.create_table_area()
         self.create_status_bar()
-        self.start_clipboard_timer(30)
 
     def eventFilter(self, obj, event):
         # активность на экране
@@ -250,7 +256,6 @@ class MainWindow(QMainWindow):
 
     def copy_to_clipboard(self, entry_id):
         #Получает пароль по ID только в момент копирования.
-        
         if not entry_id:
             return
         try:
@@ -262,11 +267,10 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("Пароль пуст", 3000)
                 return
 
-            clipboard = QApplication.clipboard()
-            clipboard.setText(password)
+            self.clipboard_service.copy_password(entry_id, password, timeout=30)
             self.statusBar().showMessage("Пароль скопирован в буфер!", 5000)
 
-            # Публикация события для интеграции 4 спринта
+            # Публикация события
             self.entry_manager.copy_to_clipboard_secure(entry_id)
 
             if hasattr(self, 'start_clipboard_timer'):
@@ -283,27 +287,16 @@ class MainWindow(QMainWindow):
         self.timer_label = QLabel("")
         self.status_bar.addPermanentWidget(self.timer_label)
 
-    def start_clipboard_timer(self, seconds=30):
-        #  обратный отсчет для очистки буфера
-        self.remaining_time = seconds
-        self.update_timer_label()
-
-        # срабатывание каждую секунду для обновления текста
-        self.clipboard_timer.start(1000)
-
-    def update_timer_label(self):
-        if self.remaining_time > 0:
-            self.timer_label.setText(f"Буфер очистится через: {self.remaining_time}с  ")
-            self.remaining_time -= 1
+    def update_timer_label_service(self, seconds: int):
+        """Слот для обновления лейбла таймера из сервиса."""
+        if seconds > 0:
+            self.timer_label.setText(f"Буфер очистится через: {seconds}с  ")
         else:
-            self.clear_clipboard()
+            self.timer_label.setText("")
 
-    def clear_clipboard(self):
-        # очистка буфера и сброс интерфейса таймера
-        self.clipboard_timer.stop()
-        QApplication.clipboard().clear()
-        self.timer_label.setText("")
-        self.status_bar.showMessage("Буфер обмена очищен", 3000)
+    def on_clipboard_cleared(self):
+        """Слот для уведомления об очистке (вызывается сервисом)."""
+        self.statusBar().showMessage("Буфер обмена очищен", 3000)
 
     def copy_password(self, password):  # функция копирования запускающая процесс
         QApplication.clipboard().setText(password)
