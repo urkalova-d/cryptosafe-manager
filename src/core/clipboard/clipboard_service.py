@@ -21,10 +21,11 @@ class ClipboardService(QObject):
     # --- Internal State ---
     _instance = None
 
-    def __init__(self, platform_adapter: PlatformAdapter, monitor: ClipboardMonitor):
+    def __init__(self, platform_adapter: PlatformAdapter, monitor: ClipboardMonitor,db_helper=None):
         super().__init__()
         self.adapter = platform_adapter
         self.monitor = monitor
+        self.db_helper = db_helper
 
         # Secure Memory Storage
         self._secure_data: Optional[bytearray] = None
@@ -34,7 +35,8 @@ class ClipboardService(QObject):
         self._clear_timer = QTimer(self)
         self._clear_timer.timeout.connect(self._tick)
         self._remaining_seconds = 0
-        self._timeout_duration = 30  # Default
+        # Load settings
+        self._timeout_duration = self._load_timeout()
 
         # Monitor Integration
         self.monitor.content_changed.connect(self._on_external_clipboard_change)
@@ -45,6 +47,38 @@ class ClipboardService(QObject):
             if adapter and monitor:
                 cls._instance = cls(adapter, monitor)
         return cls._instance
+
+    def set_db_helper(self, db_helper):
+        """Устанавливает хелпер БД после инициализации."""
+        self.db_helper = db_helper
+        self._timeout_duration = self._load_timeout()
+
+    def _load_timeout(self) -> int:
+        """Загружает таймаут из БД. Default: 30 сек."""
+        if not self.db_helper:
+            return 30
+        val = self.db_helper.get_setting("clipboard_timeout")
+        try:
+            return int(val) if val else 30
+        except ValueError:
+            return 30
+
+    def set_timeout(self, seconds: int):
+        """Устанавливает и сохраняет новый таймаут."""
+        if seconds < 5: seconds = 5  # Min limit (Req 2)
+        if seconds > 300: seconds = 300  # Max limit 5 min (Req 2)
+        if seconds == 0:
+            # 0 means "Never" (Req 2)
+            pass
+
+        self._timeout_duration = seconds
+
+        if self.db_helper:
+            self.db_helper.save_setting("clipboard_timeout", seconds)
+            print(f"[ClipboardService] Timeout set to {seconds}s and saved.")
+
+    def get_timeout(self) -> int:
+        return self._timeout_duration
 
     def copy_password(self, entry_id: int, password: str, timeout: int = 30):
         """
@@ -67,13 +101,14 @@ class ClipboardService(QObject):
             self.monitor.update_internal_state(password)
 
             # 3. Start Timer
-            self._timeout_duration = timeout
-            self._remaining_seconds = timeout
-            self._clear_timer.start(1000)  # 1 second interval
+            if self._timeout_duration > 0:
+                self._remaining_seconds = self._timeout_duration
+                self._clear_timer.start(1000)
+                print(f"[ClipboardService] Password copied. Auto-clear in {self._timeout_duration}s.")
+            else:
+                print("[ClipboardService] Password copied. Auto-clear DISABLED (Never).")
 
-            # Emit Event
             self.clipboard_copied.emit(entry_id)
-            print(f"[ClipboardService] Password copied. Auto-clear in {timeout}s.")
         else:
             self._cleanup_memory()
             raise RuntimeError("Failed to copy password to clipboard")
@@ -82,22 +117,6 @@ class ClipboardService(QObject):
         """Принудительная очистка буфера."""
         self._perform_clear()
 
-    def get_preview(self) -> str:
-        """
-        Возвращает маскированный превью пароля.
-        Security: Не возвращает полный пароль.
-        """
-        if not self._secure_data or len(self._secure_data) == 0:
-            return "Буфер пуст"
-
-        try:
-            # Восстанавливаем строку временно для превью
-            pwd = self._secure_data.decode('utf-8')
-            if len(pwd) <= 4:
-                return "****"
-            return f"{pwd[:2]}{'*' * (len(pwd) - 4)}{pwd[-2:]}"
-        except Exception:
-            return "******"
 
     def _tick(self):
         """Тик таймера."""
@@ -128,6 +147,7 @@ class ClipboardService(QObject):
                 self._secure_data[i] = 0  # Zero out memory
             self._secure_data = None
         self._current_entry_id = None
+        self.timer_updated.emit(0)
 
     def _on_external_clipboard_change(self, new_content: str):
         """
@@ -143,6 +163,6 @@ class ClipboardService(QObject):
                     print("[ClipboardService] External clipboard change detected. Canceling auto-clear.")
                     self._clear_timer.stop()
                     self._cleanup_memory()
-                    self.timer_updated.emit(0)
+
             except Exception:
                 pass

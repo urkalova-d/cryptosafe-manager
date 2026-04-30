@@ -63,7 +63,7 @@ class MainWindow(QMainWindow):
         from src.core.clipboard import ClipboardService, PlatformAdapter, ClipboardMonitor
         self.platform_adapter = PlatformAdapter()
         self.clipboard_monitor = ClipboardMonitor(self.platform_adapter)
-        self.clipboard_service = ClipboardService(self.platform_adapter, self.clipboard_monitor)
+        self.clipboard_service = ClipboardService(self.platform_adapter, self.clipboard_monitor, self.db_helper)
 
         # Подключение сигналов сервиса к UI
         self.clipboard_service.timer_updated.connect(self.update_timer_label_service)
@@ -119,6 +119,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         print("Закрытие приложения -> Очистка памяти")
+        self.clipboard_service.clear_now()
         self.auth_service.logout()
         super().closeEvent(event)
 
@@ -146,6 +147,7 @@ class MainWindow(QMainWindow):
     def on_user_logged_out(self):
         # для события выхода
         print("Событие: UserLoggedOut")
+        self.clipboard_service.clear_now()
         self.hide()
         QMessageBox.information(self, "Сессия завершена", "Вы были автоматически вышли из системы.")
         self.show_login_dialog()
@@ -164,6 +166,9 @@ class MainWindow(QMainWindow):
         file_menu.addAction("Создать")
         file_menu.addAction("Открыть")
         file_menu.addAction("Резервное копирование")
+
+        clear_clip_action = file_menu.addAction("Очистить буфер обмена")
+        clear_clip_action.triggered.connect(self.manual_clear_clipboard)
         file_menu.addSeparator()
         exit_action = file_menu.addAction("Выход")
         exit_action.triggered.connect(self.close)
@@ -267,7 +272,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("Пароль пуст", 3000)
                 return
 
-            self.clipboard_service.copy_password(entry_id, password, timeout=30)
+            self.clipboard_service.copy_password(entry_id, password)
             self.statusBar().showMessage("Пароль скопирован в буфер!", 5000)
 
             # Публикация события
@@ -799,3 +804,8 @@ class MainWindow(QMainWindow):
 
         # Обновляем модель комплетера
         self.completer.setModel(QStringListModel(history, self))
+
+    def manual_clear_clipboard(self):
+        """Ручная очистка буфера через UI."""
+        self.clipboard_service.clear_now()
+        self.statusBar().showMessage("Буфер обмена очищен вручную", 3000)
