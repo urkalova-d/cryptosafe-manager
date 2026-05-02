@@ -7,6 +7,7 @@ from PyQt6.QtGui import QIcon, QPixmap
 
 from urllib.parse import urlparse
 from src.core.vault.password_generator import PasswordGenerator
+from PyQt6.QtGui import QAction
 
 import requests
 
@@ -43,6 +44,12 @@ class AddRecordWindow(QDialog):
 
         self._is_updating_url = False
 
+        # Получаем clipboard_service от parent (MainWindow)
+        if parent and hasattr(parent, 'clipboard_service'):
+            self.clipboard_service = parent.clipboard_service
+        else:
+            self.clipboard_service = None
+
         layout = QVBoxLayout()
         form = QFormLayout()
 
@@ -78,6 +85,8 @@ class AddRecordWindow(QDialog):
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.password.textChanged.connect(self.update_strength_indicator)
 
+        self.password.keyPressEvent = self._create_keypress_handler(self.password)
+
         # метка силы
         self.strength_label = QLabel("")
         self.strength_label.setStyleSheet("font-size: 10px;")
@@ -91,7 +100,10 @@ class AddRecordWindow(QDialog):
         self.notes = QLineEdit()
         form.addRow("Заметки:", self.notes)
 
+
         layout.addLayout(form)
+        if self.clipboard_service:
+            self.integrate_ephemeral_paste(self.password)
 
         # кнопки
 
@@ -296,3 +308,85 @@ class AddRecordWindow(QDialog):
             self.notes.text()
         )
         self.accept()
+
+    def integrate_ephemeral_paste(self, line_edit: QLineEdit):
+        """
+        Интеграция эфемерной вставки в поле ввода.
+        Позволяет вставлять пароль через стандартное Ctrl+V когда эфемерный режим включен.
+        """
+        if not self.clipboard_service:
+            return
+
+        # Сохраняем оригинальный метод paste
+        original_paste = line_edit.paste
+
+        def custom_paste():
+            """Переопределенная вставка для эфемерного режима"""
+            if self.clipboard_service and self.clipboard_service.is_ephemeral_mode():
+                # В эфемерном режиме - берем пароль из эфемерного буфера
+                password = self.clipboard_service.get_ephemeral_password()
+                if password:
+                    line_edit.setText(password)
+                    if self.parent() and hasattr(self.parent(), 'statusBar'):
+                        self.parent().statusBar().showMessage("🔒 Пароль вставлен из эфемерного буфера", 3000)
+                    return
+            # Иначе - стандартная вставка
+            original_paste()
+
+        # Переопределяем paste
+        line_edit.paste = custom_paste
+
+    def _ephemeral_paste_to_field(self, line_edit: QLineEdit):
+        """Вставка из эфемерного буфера в поле"""
+        if not self.clipboard_service:
+            return
+        password = self.clipboard_service.get_ephemeral_password()
+        if password:
+            line_edit.setText(password)
+            # Уведомление (если есть statusBar через parent)
+            if self.parent() and hasattr(self.parent(), 'statusBar'):
+                self.parent().statusBar().showMessage("Пароль вставлен из эфемерного буфера (безопасно)", 3000)
+
+    def _paste_from_ephemeral(self):
+        """Вставка из эфемерного буфера по кнопке"""
+        if not self.clipboard_service:
+            return
+        password = self.clipboard_service.get_ephemeral_password()
+        if password:
+            self.password.setText(password)
+            self.password.setEchoMode(QLineEdit.EchoMode.Normal)
+            if self.parent() and hasattr(self.parent(), 'statusBar'):
+                self.parent().statusBar().showMessage("🔒 Пароль вставлен из эфемерного буфера", 3000)
+        else:
+            QMessageBox.information(self, "Нет данных", "В эфемерном буфере нет пароля")
+
+    def _update_ephemeral_button(self):
+        """Обновление состояния кнопки эфемерной вставки"""
+        if not self.clipboard_service:
+            return
+        is_ephemeral = self.clipboard_service.is_ephemeral_mode()
+        has_data = False
+        if hasattr(self.clipboard_service, 'defender') and self.clipboard_service.defender:
+            has_data = self.clipboard_service.defender.has_ephemeral_data()
+        self.ephemeral_paste_btn.setVisible(is_ephemeral and has_data)
+
+    def _create_keypress_handler(self, line_edit):
+        """Создает обработчик клавиш для поля ввода"""
+        original_keypress = line_edit.keyPressEvent
+
+        def custom_keypress(event):
+            # Проверяем Ctrl+V
+            if event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_V:
+                if self.clipboard_service and self.clipboard_service.is_ephemeral_mode():
+                    password = self.clipboard_service.get_ephemeral_password()
+                    if password:
+                        line_edit.setText(password)
+                        line_edit.setEchoMode(QLineEdit.EchoMode.Normal)
+                        if self.parent() and hasattr(self.parent(), 'statusBar'):
+                            self.parent().statusBar().showMessage("🔒 Пароль вставлен из эфемерного буфера", 3000)
+                        return
+            # Для всех остальных клавиш - стандартная обработка
+            original_keypress(event)
+
+        return custom_keypress
+

@@ -9,7 +9,7 @@ from src.gui.setup_wizard import SetupWizard
 from src.gui.add_record_window import AddRecordWindow
 from src.gui.widgets.secure_table import SecureTable
 from PyQt6.QtCore import Qt, QTimer, QEvent, QObject, pyqtSignal, QThread
-
+from PyQt6.QtWidgets import QPushButton
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox,
                              QTableWidget, QApplication, QTableWidgetItem, QHeaderView,
                              QMenuBar, QMenu, QStatusBar, QToolBar, QLabel,
@@ -61,6 +61,7 @@ class MainWindow(QMainWindow):
         self.entry_manager.EntryDeleted.connect(self.on_entry_deleted)
 
         from src.core.clipboard import ClipboardService, PlatformAdapter, ClipboardMonitor
+
         self.platform_adapter = PlatformAdapter()
         self.clipboard_monitor = ClipboardMonitor(self.platform_adapter)
         self.clipboard_service = ClipboardService(self.platform_adapter, self.clipboard_monitor, self.db_helper)
@@ -69,11 +70,13 @@ class MainWindow(QMainWindow):
         self.clipboard_service.timer_updated.connect(self.update_timer_label_service)
         self.clipboard_service.clipboard_cleared.connect(self.on_clipboard_cleared)
 
+        self.clipboard_service.ephemeral_mode_changed.connect(self._on_ephemeral_mode_changed)
         # Запуск мониторинга буфера
         self.clipboard_monitor.start_monitoring()
 
         self.auth_service = AuthenticationService(self.key_manager, self.db_helper, timeout_seconds=3600)
         self.encryption_service = EncryptionService(self.key_manager)
+
         # Подключение сигналов
         self.auth_service.UserLoggedIn.connect(self.on_user_logged_in)
         self.auth_service.UserLoggedOut.connect(self.on_user_logged_out)
@@ -110,10 +113,25 @@ class MainWindow(QMainWindow):
         self.create_status_bar()
 
     def eventFilter(self, obj, event):
-        # активность на экране
+        # Существующая проверка активности
         if event.type() in [QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress]:
             if hasattr(self, 'auth_service') and self.auth_service.is_authenticated():
                 self.auth_service.update_activity()
+
+        # Глобальный перехват Ctrl+V для эфемерного буфера
+        if event.type() == QEvent.Type.KeyPress:
+            if event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_V:
+                # Проверяем, включен ли эфемерный режим
+                if hasattr(self, 'clipboard_service') and self.clipboard_service.is_ephemeral_mode():
+                    # Получаем пароль из эфемерного буфера
+                    password = self.clipboard_service.get_ephemeral_password()
+                    if password:
+                        # Находим активное поле ввода
+                        focus_widget = QApplication.focusWidget()
+                        if isinstance(focus_widget, QLineEdit):
+                            focus_widget.setText(password)
+                            self.statusBar().showMessage("🔒 Пароль вставлен из эфемерного буфера", 3000)
+                            return True  # Событие обработано, не передаем дальше
 
         return super().eventFilter(obj, event)
 
@@ -215,6 +233,17 @@ class MainWindow(QMainWindow):
         # Добавляем спейсер или просто следующую кнопку
         toolbar.addSeparator()
 
+        self.ephemeral_action = QAction("🔒 Эфемерный режим", self)
+        self.ephemeral_action.setCheckable(True)
+        self.ephemeral_action.setToolTip(
+            "Включить эфемерный режим\n"
+            "В этом режиме пароли НЕ попадают в системный буфер обмена.\n"
+            "Для вставки используйте пункт меню 'Вставить из эфемерного буфера'."
+        )
+        self.ephemeral_action.toggled.connect(self._on_ephemeral_action_toggled)
+        toolbar.addAction(self.ephemeral_action)
+
+
         # поиск
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Поиск (title:work, user:admin)...")
@@ -234,6 +263,20 @@ class MainWindow(QMainWindow):
 
         toolbar.addWidget(QLabel("  Поиск: "))
         toolbar.addWidget(self.search_bar)
+
+    def _on_ephemeral_action_toggled(self, checked):
+        """
+        Обработчик кнопки эфемерного режима в тулбаре.
+        Просто делегирует логику сервису. UI обновится через сигнал.
+        """
+        if hasattr(self, 'clipboard_service'):
+            self.clipboard_service.set_ephemeral_mode(checked)
+
+            # Если включаем режим, можно показать краткую подсказку один раз
+            if checked:
+                QMessageBox.information(self, "Эфемерный режим",
+                                        "Пароли больше не попадают в историю буфера обмена.\n"
+                                        "Для вставки используйте Ctrl+V внутри приложения.")
 
     def toggle_password_visibility(self, checked):
         #показ паролей
@@ -809,3 +852,104 @@ class MainWindow(QMainWindow):
         """Ручная очистка буфера через UI."""
         self.clipboard_service.clear_now()
         self.statusBar().showMessage("Буфер обмена очищен вручную", 3000)
+
+    def _on_ephemeral_mode_changed(self, enabled):
+        """
+        MON-4: Обработчик изменения эфемерного режима.
+        Управляет индикатором в тулбаре.
+        """
+        if enabled:
+            self.statusBar().showMessage(
+                "🔒 Эфемерный режим ВКЛЮЧЕН - пароли не попадают в системный буфер",
+                5000
+            )
+            # Если индикатора нет - создаем
+            if not hasattr(self, '_ephemeral_indicator') or not self._ephemeral_indicator:
+                self._ephemeral_indicator = QLabel("🔒 EPHEMERAL MODE")
+                self._ephemeral_indicator.setStyleSheet(
+                    "color: #27ae60; font-weight: bold; padding: 0 15px; background-color: #2c3e50; border-radius: 3px;"
+                )
+                # Добавляем в тулбар
+                for toolbar in self.findChildren(QToolBar):
+                    toolbar.addWidget(self._ephemeral_indicator)
+                    break
+            else:
+                # Если уже был создан, показываем
+                self._ephemeral_indicator.setVisible(True)
+
+            # Синхронизируем кнопку
+            if hasattr(self, 'ephemeral_action') and self.ephemeral_action.isChecked() != enabled:
+                self.ephemeral_action.setChecked(True)
+
+        else:
+            # --- ИСПРАВЛЕНИЕ: Полностью удаляем индикатор ---
+            if hasattr(self, '_ephemeral_indicator') and self._ephemeral_indicator:
+                # 1. Удаляем виджет из интерфейса
+                self._ephemeral_indicator.deleteLater()
+                # 2. Затираем переменную, чтобы Python знал, что её нет
+                self._ephemeral_indicator = None
+
+            self.statusBar().showMessage("Эфемерный режим ВЫКЛЮЧЕН", 3000)
+
+            # Синхронизируем кнопку
+            if hasattr(self, 'ephemeral_action') and self.ephemeral_action.isChecked() != enabled:
+                self.ephemeral_action.setChecked(False)
+
+
+
+    def integrate_ephemeral_paste_for_widget(self, line_edit: QLineEdit):
+        """
+        MON-4: Интеграция эфемерной вставки для поля ввода.
+        Добавляет пункт в контекстное меню для вставки из эфемерного буфера.
+        """
+        if not hasattr(self, 'clipboard_service'):
+            return
+
+        from PyQt6.QtGui import QAction
+
+        def custom_context_menu(pos):
+            menu = QMenu(line_edit)
+
+            # Стандартные действия
+            copy_action = menu.addAction("📋 Копировать")
+            copy_action.triggered.connect(line_edit.copy)
+
+            cut_action = menu.addAction("✂️ Вырезать")
+            cut_action.triggered.connect(line_edit.cut)
+
+            menu.addSeparator()
+
+            # Эфемерная вставка (если есть данные)
+            ephemeral_action = QAction("🔒 Вставить из эфемерного буфера (безопасно)", line_edit)
+            has_ephemeral = (self.clipboard_service.defender.has_ephemeral_data()
+                             if hasattr(self.clipboard_service, 'defender') else False)
+            ephemeral_action.setEnabled(has_ephemeral)
+            ephemeral_action.triggered.connect(lambda: self._ephemeral_paste_to_field(line_edit))
+            menu.addAction(ephemeral_action)
+
+            # Стандартная вставка
+            paste_action = menu.addAction("📋 Вставить (стандартно)")
+            paste_action.triggered.connect(line_edit.paste)
+
+            menu.exec(line_edit.mapToGlobal(pos))
+
+        line_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        line_edit.customContextMenuRequested.connect(custom_context_menu)
+
+    def _ephemeral_paste_to_field(self, line_edit: QLineEdit):
+        """
+        MON-4: Вставка пароля из эфемерного буфера в поле
+        """
+        password = self.clipboard_service.get_ephemeral_password()
+        if password:
+            line_edit.setText(password)
+            self.statusBar().showMessage(
+                "🔒 Пароль вставлен из эфемерного буфера (безопасно, без системного буфера)",
+                3000
+            )
+            # Опционально: очищаем эфемерный буфер после вставки
+            # self.clipboard_service.defender._clear_ephemeral()
+        else:
+            self.statusBar().showMessage("Нет данных в эфемерном буфере", 2000)
+
+

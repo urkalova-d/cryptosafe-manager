@@ -1,4 +1,5 @@
 import secrets
+import ctypes
 from typing import Optional
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 
@@ -6,26 +7,45 @@ from .platform_adapter import PlatformAdapter
 from .clipboard_monitor import ClipboardMonitor
 
 
+# Простая реализация уровня угрозы для совместимости
+class ThreatLevel:
+    NONE = 0
+    LOW = 1
+    MEDIUM = 2
+    HIGH = 3
+    CRITICAL = 4
+
+
 class ClipboardService(QObject):
     """
     Централизованный интерфейс для работы с буфером обмена.
-    Реализует Observer pattern через PyQt сигналы.
-    Интегрируется с KeyStorage для безопасного хранения.
+    Объединяет сервис и защиту (Defender) в одном классе для надежности.
     """
 
     # --- Observer Signals ---
-    clipboard_copied = pyqtSignal(int)  # ID записи, чей пароль скопирован
-    clipboard_cleared = pyqtSignal()  # Буфер очищен
-    timer_updated = pyqtSignal(int)  # Оставшееся время в секундах
+    clipboard_copied = pyqtSignal(int)
+    clipboard_cleared = pyqtSignal()
+    timer_updated = pyqtSignal(int)
 
-    # --- Internal State ---
+    # --- Defense Signals ---
+    threat_detected = pyqtSignal(int, str)  # (ThreatLevel, message)
+    block_state_changed = pyqtSignal(bool)
+    ephemeral_mode_changed = pyqtSignal(bool)
+
     _instance = None
 
-    def __init__(self, platform_adapter: PlatformAdapter, monitor: ClipboardMonitor,db_helper=None):
+    def __init__(self, platform_adapter: PlatformAdapter, monitor: ClipboardMonitor, db_helper=None):
         super().__init__()
         self.adapter = platform_adapter
         self.monitor = monitor
         self.db_helper = db_helper
+
+        # --- Ephemeral Mode State (MON-4) ---
+        self._ephemeral_mode = False
+        self._ephemeral_password: Optional[str] = None
+        self._ephemeral_entry_id: Optional[int] = None
+        self._ephemeral_timer = QTimer(self)
+        self._ephemeral_timer.timeout.connect(self._clear_ephemeral)
 
         # Secure Memory Storage
         self._secure_data: Optional[bytearray] = None
@@ -35,28 +55,26 @@ class ClipboardService(QObject):
         self._clear_timer = QTimer(self)
         self._clear_timer.timeout.connect(self._tick)
         self._remaining_seconds = 0
-        # Load settings
         self._timeout_duration = self._load_timeout()
 
         # Monitor Integration
         self.monitor.content_changed.connect(self._on_external_clipboard_change)
 
+    # --- Singleton ---
     @classmethod
-    def get_instance(cls, adapter=None, monitor=None):
+    def get_instance(cls, adapter=None, monitor=None, db_helper=None):
         if cls._instance is None:
             if adapter and monitor:
-                cls._instance = cls(adapter, monitor)
+                cls._instance = cls(adapter, monitor, db_helper)
         return cls._instance
 
+    # --- Settings ---
     def set_db_helper(self, db_helper):
-        """Устанавливает хелпер БД после инициализации."""
         self.db_helper = db_helper
         self._timeout_duration = self._load_timeout()
 
     def _load_timeout(self) -> int:
-        """Загружает таймаут из БД. Default: 30 сек."""
-        if not self.db_helper:
-            return 30
+        if not self.db_helper: return 30
         val = self.db_helper.get_setting("clipboard_timeout")
         try:
             return int(val) if val else 30
@@ -64,105 +82,122 @@ class ClipboardService(QObject):
             return 30
 
     def set_timeout(self, seconds: int):
-        """Устанавливает и сохраняет новый таймаут."""
-        if seconds < 5: seconds = 5  # Min limit (Req 2)
-        if seconds > 300: seconds = 300  # Max limit 5 min (Req 2)
-        if seconds == 0:
-            # 0 means "Never" (Req 2)
-            pass
-
+        if seconds < 5: seconds = 5
+        if seconds > 300: seconds = 300
         self._timeout_duration = seconds
-
         if self.db_helper:
             self.db_helper.save_setting("clipboard_timeout", seconds)
-            print(f"[ClipboardService] Timeout set to {seconds}s and saved.")
 
     def get_timeout(self) -> int:
         return self._timeout_duration
 
-    def copy_password(self, entry_id: int, password: str, timeout: int = 30):
-        """
-        Безопасно копирует пароль в буфер.
-        1. Сохраняет пароль в защищенной памяти (bytearray).
-        2. Кладет в системный буфер.
-        3. Запускает таймер очистки.
-        """
-        self._cleanup_memory()
+    # --- MON-4: Ephemeral Mode ---
 
-        # 1. Store in "secure" memory (bytearray allows zeroing out)
+    def set_ephemeral_mode(self, enabled: bool):
+        """Включение/выключение эфемерного режима."""
+        self._ephemeral_mode = enabled
+        self.ephemeral_mode_changed.emit(enabled)
+
+        if enabled:
+            # При включении очищаем системный буфер для безопасности
+            self.adapter.clear_clipboard()
+            self._cleanup_memory()
+            print("[ClipboardService] Ephemeral mode ENABLED")
+        else:
+            self._clear_ephemeral()
+            print("[ClipboardService] Ephemeral mode DISABLED")
+
+    def is_ephemeral_mode(self) -> bool:
+        return self._ephemeral_mode
+
+    def get_ephemeral_password(self) -> Optional[str]:
+        """Метод для получения пароля из эфемерного буфера (используется в UI)."""
+        if self._ephemeral_mode:
+            return self._ephemeral_password
+        return None
+
+    def has_ephemeral_data(self) -> bool:
+        return self._ephemeral_mode and self._ephemeral_password is not None
+
+    def _clear_ephemeral(self):
+        """Очистка эфемерного буфера."""
+        self._ephemeral_password = None
+        self._ephemeral_entry_id = None
+        self._ephemeral_timer.stop()
+
+    # --- Main Copy Logic ---
+
+    def copy_password(self, entry_id: int, password: str):
+        """
+        Копирование пароля. 
+        Если включен эфемерный режим - сохраняет только в памяти.
+        Если обычный режим - в системный буфер.
+        """
+        # Эфемерный режим
+        if self._ephemeral_mode:
+            self._clear_ephemeral()
+            self._ephemeral_password = password
+            self._ephemeral_entry_id = entry_id
+
+            # Запускаем таймер жизни эфемерного пароля
+            if self._timeout_duration > 0:
+                self._ephemeral_timer.start(self._timeout_duration * 1000)
+
+            self.clipboard_copied.emit(entry_id)
+            print(f"[ClipboardService] Password stored in EPHEMERAL memory (timeout: {self._timeout_duration}s)")
+            return
+
+        # Обычный режим
+        self._cleanup_memory()
         self._secure_data = bytearray(password.encode('utf-8'))
         self._current_entry_id = entry_id
 
-        # 2. Copy to system clipboard
         success = self.adapter.copy_to_clipboard(password)
 
         if success:
-            # Update monitor to ignore this specific change if needed
             self.monitor.update_internal_state(password)
-
-            # 3. Start Timer
             if self._timeout_duration > 0:
                 self._remaining_seconds = self._timeout_duration
                 self._clear_timer.start(1000)
-                print(f"[ClipboardService] Password copied. Auto-clear in {self._timeout_duration}s.")
-            else:
-                print("[ClipboardService] Password copied. Auto-clear DISABLED (Never).")
-
             self.clipboard_copied.emit(entry_id)
         else:
             self._cleanup_memory()
             raise RuntimeError("Failed to copy password to clipboard")
 
     def clear_now(self):
-        """Принудительная очистка буфера."""
+        """Принудительная очистка обоих буферов."""
         self._perform_clear()
+        self._clear_ephemeral()
 
+    # --- Internal Logic ---
 
     def _tick(self):
-        """Тик таймера."""
         self._remaining_seconds -= 1
         self.timer_updated.emit(self._remaining_seconds)
-
         if self._remaining_seconds <= 0:
             self._perform_clear()
 
     def _perform_clear(self):
-        """Выполняет очистку памяти и буфера."""
         self._clear_timer.stop()
-
-        # 1. Clear system clipboard
         self.adapter.clear_clipboard()
-
-        # 2. Clear internal memory
         self._cleanup_memory()
-
-        # 3. Emit Event
         self.clipboard_cleared.emit()
-        print("[ClipboardService] Clipboard cleared and memory zeroed.")
+        print("[ClipboardService] Clipboard cleared.")
 
     def _cleanup_memory(self):
-        """Безопасная очистка внутренней памяти."""
         if self._secure_data:
             for i in range(len(self._secure_data)):
-                self._secure_data[i] = 0  # Zero out memory
+                self._secure_data[i] = 0
             self._secure_data = None
         self._current_entry_id = None
         self.timer_updated.emit(0)
 
     def _on_external_clipboard_change(self, new_content: str):
-        """
-        Реакция на изменение буфера извне.
-        Если пользователь скопировал что-то другое, мы сбрасываем таймер.
-        """
         if self._secure_data:
-            # Если у нас есть данные в памяти, значит мы ожидали очистки.
-            # Если контент изменился на другой, сбрасываем нашу защиту.
             try:
-                current_pwd = self._secure_data.decode('utf-8')
-                if new_content != current_pwd:
-                    print("[ClipboardService] External clipboard change detected. Canceling auto-clear.")
+                if new_content != self._secure_data.decode('utf-8'):
+                    print("[ClipboardService] External change detected.")
                     self._clear_timer.stop()
                     self._cleanup_memory()
-
             except Exception:
                 pass
