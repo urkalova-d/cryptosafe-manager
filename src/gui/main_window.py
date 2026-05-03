@@ -13,7 +13,10 @@ from PyQt6.QtWidgets import QPushButton
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox,
                              QTableWidget, QApplication, QTableWidgetItem, QHeaderView,
                              QMenuBar, QMenu, QStatusBar, QToolBar, QLabel,
-                             QProgressDialog, QLineEdit, QCompleter)
+                             QProgressDialog, QLineEdit, QCompleter, QPushButton,
+                             QSizePolicy)
+from PyQt6.QtWidgets import QMessageBox, QApplication, QLabel, QWidget, QHBoxLayout, QPushButton
+from PyQt6.QtCore import Qt, QTimer
 from src.core.crypto.key_manager import KeyManager
 from src.core.crypto.authentication import AuthenticationService
 from src.core.vault.encryption_service import EncryptionService
@@ -42,7 +45,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("CryptoSafe Password Manager")
         self.resize(1000, 650)
-
+        # Кэш и настройки
+        self.settings = QSettings("CryptoSafe", "PasswordManager")
         # инициализация бд
         from src.database.db import db_manager
         self.db_helper = db_manager
@@ -55,48 +59,57 @@ class MainWindow(QMainWindow):
         from src.core.vault.entry_manager import EntryManager
         self.entry_manager = EntryManager(self.db_helper, self.key_manager)
 
-        # Подключение сигналов менеджера
+        # Подключаем сигналы менеджера записей
         self.entry_manager.EntryCreated.connect(self.on_entry_created)
         self.entry_manager.EntryUpdated.connect(self.on_entry_updated)
         self.entry_manager.EntryDeleted.connect(self.on_entry_deleted)
 
+        # ЭТИ СТРОКИ ОСТАВЛЯЕМ! Они нужны.
+        self.auth_service = AuthenticationService(self.key_manager, self.db_helper, timeout_seconds=3600)
+        self.encryption_service = EncryptionService(self.key_manager)
+
+        self.all_records_cache = []
+        # 2. Создание UI (ЗДЕСЬ СОЗДАЕТСЯ self.table)
+        self.init_ui()
+
+        # 3. Инициализация буфера обмена
         from src.core.clipboard import ClipboardService, PlatformAdapter, ClipboardMonitor
 
         self.platform_adapter = PlatformAdapter()
         self.clipboard_monitor = ClipboardMonitor(self.platform_adapter)
         self.clipboard_service = ClipboardService(self.platform_adapter, self.clipboard_monitor, self.db_helper)
 
-        # Подключение сигналов сервиса к UI
+        # 4. Подключение сигналов (теперь self.table существует)
         self.clipboard_service.timer_updated.connect(self.update_timer_label_service)
         self.clipboard_service.clipboard_cleared.connect(self.on_clipboard_cleared)
+        self.clipboard_service.clipboard_copied.connect(self.on_clipboard_copied)
+        self.clipboard_service.warning_5_seconds.connect(self.show_clear_warning)
 
         self.clipboard_service.ephemeral_mode_changed.connect(self._on_ephemeral_mode_changed)
-        # Запуск мониторинга буфера
+        print("[MainWindow] Ephemeral mode signal CONNECTED")
+        # Подключение новых сигналов таблицы
+        self.table.copy_password_requested.connect(self.copy_password_to_clipboard)
+        self.table.copy_username_requested.connect(self.copy_username_to_clipboard)
+        self.table.copy_all_requested.connect(self.copy_all_to_clipboard)
+
+        # Запуск мониторинга
         self.clipboard_monitor.start_monitoring()
 
-        self.auth_service = AuthenticationService(self.key_manager, self.db_helper, timeout_seconds=3600)
-        self.encryption_service = EncryptionService(self.key_manager)
-
-        # Подключение сигналов
+        # Подключение сигналов аутентификации
         self.auth_service.UserLoggedIn.connect(self.on_user_logged_in)
         self.auth_service.UserLoggedOut.connect(self.on_user_logged_out)
 
-        # таймер сессии
+        # Таймер сессии
         self.session_timer = QTimer(self)
         self.session_timer.timeout.connect(self.check_user_session)
         self.session_timer.start(5000)
 
-        # фильтр событий
+        # Фильтр событий
         QApplication.instance().installEventFilter(self)
 
-        # инициализация кэша и настроек поиска
-        self.all_records_cache = []
-        self.settings = QSettings("CryptoSafe", "PasswordManager")
 
-        self.init_ui()
 
         self.hide()
-        # проверка первого запуска
         QTimer.singleShot(100, self.check_first_run)
 
     def init_ui(self):
@@ -235,6 +248,7 @@ class MainWindow(QMainWindow):
 
         self.ephemeral_action = QAction("🔒 Эфемерный режим", self)
         self.ephemeral_action.setCheckable(True)
+        self.ephemeral_action.setChecked(False)
         self.ephemeral_action.setToolTip(
             "Включить эфемерный режим\n"
             "В этом режиме пароли НЕ попадают в системный буфер обмена.\n"
@@ -243,32 +257,27 @@ class MainWindow(QMainWindow):
         self.ephemeral_action.toggled.connect(self._on_ephemeral_action_toggled)
         toolbar.addAction(self.ephemeral_action)
 
+        # Растягивающийся спейсер
+        toolbar.addSeparator()
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar.addWidget(spacer)
 
-        # поиск
-        self.search_bar = QLineEdit()
-        self.search_bar.setPlaceholderText("Поиск (title:work, user:admin)...")
-        self.search_bar.setFixedWidth(250)
-        self.search_bar.setClearButtonEnabled(True)
-
-        # живой поиск
-        self.search_bar.textChanged.connect(self.run_search)
-        # сохранение истории энтр
-        self.search_bar.returnPressed.connect(self.save_search_history)
-
-        # настройка автодополнения
-        history = self.settings.value("search_history", [], type=list)
-        self.completer = QCompleter(history, self)
-        self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.search_bar.setCompleter(self.completer)
-
+        # Поиск
         toolbar.addWidget(QLabel("  Поиск: "))
+        self.search_bar = QLineEdit()
+        self.search_bar.setPlaceholderText("Поиск...")
+        self.search_bar.setFixedWidth(200)
+        self.search_bar.textChanged.connect(self.run_search)
         toolbar.addWidget(self.search_bar)
+
 
     def _on_ephemeral_action_toggled(self, checked):
         """
         Обработчик кнопки эфемерного режима в тулбаре.
         Просто делегирует логику сервису. UI обновится через сигнал.
         """
+        print(f"[MainWindow] Ephemeral action toggled: {checked}")
         if hasattr(self, 'clipboard_service'):
             self.clipboard_service.set_ephemeral_mode(checked)
 
@@ -300,8 +309,31 @@ class MainWindow(QMainWindow):
         # сигналы контекстного меню
         self.table.edit_requested.connect(self.edit_entry_by_id)
         self.table.delete_requested.connect(self.delete_entry_by_id)
-        self.table.copy_requested.connect(self.copy_to_clipboard)
+        #self.table.copy_requested.connect(self.copy_to_clipboard)
 
+    def create_status_bar(self):
+        self.status_bar = self.statusBar()
+        self.status_bar.showMessage("Система готова")
+
+        # Таймер очистки (будет справа)
+        self.timer_label = QLabel("")
+        self.status_bar.addPermanentWidget(self.timer_label)
+
+        # Превью буфера (будет справа, рядом с таймером)
+        self.clipboard_preview = QLabel("Буфер: пусто")
+        self.clipboard_preview.setStyleSheet("color: #888; padding: 0 10px;")
+        self.status_bar.addPermanentWidget(self.clipboard_preview)
+
+        # Индикатор эфемерного режима (САМЫЙ ПРАВЫЙ)
+        self._ephemeral_status_indicator = QLabel("🔒 EPHEMERAL MODE")
+        self._ephemeral_status_indicator.setStyleSheet(
+            "color: #27ae60; font-weight: bold; padding: 2px 8px; background-color: #2c3e50; border-radius: 3px; margin: 2px;"
+        )
+        self._ephemeral_status_indicator.setVisible(False)
+        self.status_bar.addPermanentWidget(self._ephemeral_status_indicator)
+
+        print("[MainWindow] Status bar created")
+    """
     def copy_to_clipboard(self, entry_id):
         #Получает пароль по ID только в момент копирования.
         if not entry_id:
@@ -327,13 +359,8 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"Ошибка при копировании: {e}")
             QMessageBox.critical(self, "Ошибка", "Не удалось скопировать пароль")
+    """
 
-    def create_status_bar(self):
-        self.status_bar = self.statusBar()
-        self.status_bar.showMessage("Система готова")
-
-        self.timer_label = QLabel("")
-        self.status_bar.addPermanentWidget(self.timer_label)
 
     def update_timer_label_service(self, seconds: int):
         """Слот для обновления лейбла таймера из сервиса."""
@@ -502,7 +529,6 @@ class MainWindow(QMainWindow):
                     rec_id = rec.get('id')
                     modified = rec.get('updated_at', '')
 
-                    #  Кэшируем только метаданные
                     cache_entry = {
                         'id': rec_id,
                         'service': service_name,
@@ -516,18 +542,18 @@ class MainWindow(QMainWindow):
                     }
                     cache_list.append(cache_entry)
 
-                    # Передаем в таблицу плейсхолдер.
+                    # ВАЖНО: copy_callback передаем None, так как используем сигналы SecureTable
                     self.table.add_record(
                         service_name,
                         username,
                         category,
                         "••••••••",
                         notes,
-                        self.copy_to_clipboard,
+                        None,  # copy_callback больше не нужен в старом формате
                         record_id=rec_id,
                         modified_date=modified,
                         url=url,
-                        password_getter=self.get_password_for_entry  # Передаем функцию
+                        password_getter=self.get_password_for_entry
                     )
                 except ValueError as ve:
                     self.table.add_record("ОШИБКА", "", "", "", str(ve), None)
@@ -820,7 +846,7 @@ class MainWindow(QMainWindow):
             return
 
         filtered = self.entry_manager.filter_entries(self.all_records_cache, query)
-        self.table.display_data(filtered, self.copy_to_clipboard, self.get_password_for_entry)
+        self.table.display_data(filtered, None, self.get_password_for_entry)
 
         if query:
             self.statusBar().showMessage(f"Найдено результатов: {len(filtered)}", 3000)
@@ -856,46 +882,62 @@ class MainWindow(QMainWindow):
     def _on_ephemeral_mode_changed(self, enabled):
         """
         MON-4: Обработчик изменения эфемерного режима.
-        Управляет индикатором в тулбаре.
+        Индикатор в строке статуса (самый надежный вариант).
         """
+        print(f"[MainWindow] Ephemeral mode changed: {enabled}")
+
         if enabled:
+            # Показываем сообщение в статус-баре
             self.statusBar().showMessage(
-                "🔒 Эфемерный режим ВКЛЮЧЕН - пароли не попадают в системный буфер",
+                "🔒 Эфемерный режим ВКЛЮЧЕН - пароли не попадают в системный буфер. Используйте Ctrl+V для вставки",
                 5000
             )
-            # Если индикатора нет - создаем
-            if not hasattr(self, '_ephemeral_indicator') or not self._ephemeral_indicator:
-                self._ephemeral_indicator = QLabel("🔒 EPHEMERAL MODE")
-                self._ephemeral_indicator.setStyleSheet(
-                    "color: #27ae60; font-weight: bold; padding: 0 15px; background-color: #2c3e50; border-radius: 3px;"
+
+            # Добавляем постоянный индикатор в статус-бар (слева)
+            if not hasattr(self, '_ephemeral_status_indicator'):
+                self._ephemeral_status_indicator = QLabel("🔒 EPHEMERAL MODE ACTIVE")
+                self._ephemeral_status_indicator.setStyleSheet(
+                    "color: #27ae60; font-weight: bold; padding: 2px 10px; background-color: #2c3e50; border-radius: 3px; margin: 2px;"
                 )
-                # Добавляем в тулбар
-                for toolbar in self.findChildren(QToolBar):
-                    toolbar.addWidget(self._ephemeral_indicator)
-                    break
+                # Добавляем в начало статус-бара
+                self.status_bar.insertWidget(0, self._ephemeral_status_indicator)
             else:
-                # Если уже был создан, показываем
-                self._ephemeral_indicator.setVisible(True)
+                self._ephemeral_status_indicator.setVisible(True)
 
             # Синхронизируем кнопку
-            if hasattr(self, 'ephemeral_action') and self.ephemeral_action.isChecked() != enabled:
+            if hasattr(self, 'ephemeral_action') and not self.ephemeral_action.isChecked():
                 self.ephemeral_action.setChecked(True)
 
         else:
-            # --- ИСПРАВЛЕНИЕ: Полностью удаляем индикатор ---
-            if hasattr(self, '_ephemeral_indicator') and self._ephemeral_indicator:
-                # 1. Удаляем виджет из интерфейса
-                self._ephemeral_indicator.deleteLater()
-                # 2. Затираем переменную, чтобы Python знал, что её нет
-                self._ephemeral_indicator = None
+            # Скрываем индикатор
+            if hasattr(self, '_ephemeral_status_indicator'):
+                self._ephemeral_status_indicator.setVisible(False)
 
             self.statusBar().showMessage("Эфемерный режим ВЫКЛЮЧЕН", 3000)
 
             # Синхронизируем кнопку
-            if hasattr(self, 'ephemeral_action') and self.ephemeral_action.isChecked() != enabled:
+            if hasattr(self, 'ephemeral_action') and self.ephemeral_action.isChecked():
                 self.ephemeral_action.setChecked(False)
+    def _create_ephemeral_indicator(self):
+        """Создает индикатор эфемерного режима в тулбаре."""
+        # Находим тулбар
+        toolbar = None
+        for tb in self.findChildren(QToolBar):
+            if tb.windowTitle() == "Main Toolbar":
+                toolbar = tb
+                break
 
+        if not toolbar:
+            print("[MainWindow] Toolbar not found!")
+            return
 
+        self._ephemeral_indicator = QLabel("🔒 EPHEMERAL")
+        self._ephemeral_indicator.setStyleSheet(
+            "color: #27ae60; font-weight: bold; padding: 0 10px; background-color: #2c3e50; border-radius: 3px;"
+        )
+        self._ephemeral_indicator.setVisible(False)
+        toolbar.addWidget(self._ephemeral_indicator)
+        print("[MainWindow] Ephemeral indicator created in _create_ephemeral_indicator")
 
     def integrate_ephemeral_paste_for_widget(self, line_edit: QLineEdit):
         """
@@ -952,4 +994,132 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar().showMessage("Нет данных в эфемерном буфере", 2000)
 
+    def copy_password_to_clipboard(self, entry_id):
+        """Копирует только пароль."""
+        if not entry_id: return
+        try:
+            entry_data = self.entry_manager.get_entry(entry_id)
+            password = entry_data.get('password', '')
+            if password:
+                self.clipboard_service.copy_password(entry_id, password)
+                self.show_toast("🔑 Пароль скопирован")
+            else:
+                self.statusBar().showMessage("Пароль пуст", 3000)
+        except Exception as e:
+            print(f"Error copying password: {e}")
+
+    def copy_username_to_clipboard(self, entry_id):
+        """Копирует только имя пользователя."""
+        if not entry_id: return
+        try:
+            entry_data = self.entry_manager.get_entry(entry_id)
+            username = entry_data.get('username', '')
+            if username:
+                self.clipboard_service.copy_username(entry_id, username)
+                self.show_toast("👤 Логин скопирован")
+            else:
+                self.statusBar().showMessage("Логин пуст", 3000)
+        except Exception as e:
+            print(f"Error copying username: {e}")
+
+    def copy_all_to_clipboard(self, entry_id):
+        """Копирует логин и пароль (разделенные переносом строки или табом)."""
+        if not entry_id: return
+        try:
+            entry_data = self.entry_manager.get_entry(entry_id)
+            username = entry_data.get('username', '')
+            password = entry_data.get('password', '')
+            # Формат: username:password (или другой удобный)
+            data_str = f"{username}\t{password}"
+            self.clipboard_service.copy_all(entry_id, data_str)
+            self.show_toast("📋 Данные скопированы")
+        except Exception as e:
+            print(f"Error copying all: {e}")
+
+    def on_clipboard_copied(self, entry_id):
+        """Обновление UI после копирования."""
+        # Подсвечиваем строку в таблице
+        self.table.highlight_row(entry_id)
+        # Обновляем превью в статус-баре (реализуем ниже)
+        self.update_clipboard_preview()
+
+    def on_clipboard_cleared(self):
+        """Обновление UI после очистки."""
+        self.table.remove_highlight()
+        self.statusBar().showMessage("Буфер очищен", 3000)
+        self.clear_clipboard_preview()
+        self.show_toast("🧹 Буфер очищен")
+
+    def show_clear_warning(self):
+        """Предупреждение за 5 секунд до очистки."""
+        self.show_toast("⚠️ Буфер очистится через 5 секунд!")
+        # Можно добавить мигание строки в таблице
+        self.statusBar().showMessage("⚠️ Внимание! Буфер очистится через 5 секунд", 5000)
+
+    def show_toast(self, message: str):
+        """
+        Простая реализация Toast-уведомления.
+        В идеале использовать системные уведомления (D-Bus / Windows Toast),
+        но для примера используем всплывающий QLabel.
+        """
+        if not hasattr(self, '_toast_label'):
+            self._toast_label = QLabel(self)
+            self._toast_label.setStyleSheet("""
+                QLabel {
+                    background-color: #333;
+                    color: white;
+                    padding: 10px;
+                    border-radius: 5px;
+                    font-weight: bold;
+                }
+            """)
+            self._toast_label.setWindowFlags(Qt.WindowType.ToolTip)
+
+        self._toast_label.setText(message)
+        self._toast_label.adjustSize()
+
+        # Позиционирование внизу справа
+        x = self.width() - self._toast_label.width() - 20
+        y = self.height() - self._toast_label.height() - 50
+        self._toast_label.move(x, y)
+        self._toast_label.show()
+
+        # Таймер скрытия
+        QTimer.singleShot(2000, self._toast_label.hide)
+
+    # --- Clipboard Preview Widget (Sprint 5) ---
+
+    def update_clipboard_preview(self):
+        """Обновление превью буфера в статус-баре."""
+        if not hasattr(self, 'clipboard_preview'):
+            return
+
+        entry_id = self.clipboard_service.get_current_entry_id()
+        data_type = self.clipboard_service.get_current_data_type()
+
+        if entry_id:
+            try:
+                # Ищем данные в кэше
+                entry_info = next((r for r in self.all_records_cache if r['id'] == entry_id), None)
+                if entry_info:
+                    source = entry_info.get('service', 'Unknown')
+
+                    # Маскирование контента
+                    preview_text = "••••••••"
+                    if data_type == 'username':
+                        preview_text = entry_info.get('username', '')
+                    elif data_type == 'all':
+                        preview_text = f"{entry_info.get('username', '')}:••••••••"
+
+                    self.clipboard_preview.setText(f"📋 [{source}] {preview_text}")
+                    self.clipboard_preview.setStyleSheet("color: #27ae60; font-weight: bold; padding: 0 10px;")
+            except Exception as e:
+                print(f"Preview error: {e}")
+        else:
+            self.clear_clipboard_preview()
+
+    def clear_clipboard_preview(self):
+        if hasattr(self, 'clipboard_preview'):
+            self.clipboard_preview.setText("Буфер: пусто")
+            self.clipboard_preview.setStyleSheet("color: #888; padding: 0 10px;")
 

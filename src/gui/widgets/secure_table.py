@@ -1,14 +1,17 @@
 from PyQt6.QtWidgets import (QTableWidget, QTableWidgetItem, QPushButton,
-                             QWidget, QHBoxLayout, QHeaderView, QApplication, QMenu, QAbstractItemView)
+                             QWidget, QHBoxLayout, QHeaderView, QApplication, QMenu, QAbstractItemView, QLabel)
 from urllib.parse import urlparse
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
-from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtGui import QAction, QIcon,QColor
 
 class SecureTable(QTableWidget):
     # сигналы для связи с MainWindow
     edit_requested = pyqtSignal(int)
     delete_requested = pyqtSignal(int)
-    copy_requested = pyqtSignal(int)
+    copy_password_requested = pyqtSignal(int)
+    copy_username_requested = pyqtSignal(int)
+    copy_all_requested = pyqtSignal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setColumnCount(6)
@@ -34,11 +37,13 @@ class SecureTable(QTableWidget):
         self.setColumnWidth(2, 200)  # URL
         self.setColumnWidth(3, 100)  # Категория
         self.setColumnWidth(4, 120)  # Пароль
-        self.setColumnWidth(5, 100)  # Действие
+        self.setColumnWidth(5, 120)  # Действие
 
         # Переменные для хранения состояния видимости
         self._passwords_visible = False
         self._password_data = {}  # Храним ID -> пароль
+
+        self._active_clipboard_row = -1
 
         #  Контекстное меню
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -55,7 +60,8 @@ class SecureTable(QTableWidget):
         self._password_data[row_position] = {
             'id': record_id,
             'visible': False,
-            'getter': password_getter
+            'getter': password_getter,
+            'username': login
         }
 
 
@@ -93,29 +99,66 @@ class SecureTable(QTableWidget):
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(2)
 
-        # Кнопка копирования
-        copy_btn = QPushButton("📋")
-        copy_btn.setToolTip("Копировать")
-        copy_btn.setFixedSize(QSize(30, 24))
+        # Кнопка копирования пароля
+        copy_pass_btn = QPushButton("🔑")
+        copy_pass_btn.setToolTip("Копировать пароль")
+        copy_pass_btn.setFixedSize(QSize(28, 24))
+        if record_id is not None:
+            copy_pass_btn.clicked.connect(lambda checked=False, eid=record_id: self.copy_password_requested.emit(eid))
 
-        if copy_callback and record_id is not None:
-            # Используем default argument capture (eid=record_id)
-            copy_btn.clicked.connect(lambda checked=False, eid=record_id: copy_callback(eid))
+        # Кнопка копирования логина
+        copy_user_btn = QPushButton("👤")
+        copy_user_btn.setToolTip("Копировать логин")
+        copy_user_btn.setFixedSize(QSize(28, 24))
+        if record_id is not None:
+            copy_user_btn.clicked.connect(lambda checked=False, eid=record_id: self.copy_username_requested.emit(eid))
 
-        # Кнопка показа
+        # Кнопка показа (глаз)
         toggle_btn = QPushButton("👁")
         toggle_btn.setToolTip("Показать/Скрыть")
-        toggle_btn.setFixedSize(QSize(30, 24))
-
-        # Фиксируем row_position через аргумент функции по умолчанию
+        toggle_btn.setFixedSize(QSize(28, 24))
         toggle_btn.clicked.connect(lambda checked=False, r=row_position: self.toggle_row_password(r))
 
-        layout.addWidget(copy_btn)
+        layout.addWidget(copy_pass_btn)
+        layout.addWidget(copy_user_btn)
         layout.addWidget(toggle_btn)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Устанавливаем виджет в ячейку
         self.setCellWidget(row_position, 5, container)
+
+
+    # Sprint 5: Индикация строки в буфере
+    def highlight_row(self, entry_id):
+        """Подсвечивает строку, чей контент сейчас в буфере."""
+        self._active_clipboard_row = -1
+        # Сброс подсветки всех строк
+        for row in range(self.rowCount()):
+            for col in range(self.columnCount()):
+                item = self.item(row, col)
+                if item:
+                    item.setBackground(Qt.GlobalColor.white)  # Или базовый цвет
+
+        # Поиск и подсветка нужной строки
+        for row in range(self.rowCount()):
+            data = self._password_data.get(row)
+            if data and data['id'] == entry_id:
+                self._active_clipboard_row = row
+                highlight_color = QColor(230, 240, 255)  # Светло-голубой
+                for col in range(self.columnCount()):
+                    item = self.item(row, col)
+                    if item:
+                        item.setBackground(highlight_color)
+                break
+
+    def remove_highlight(self):
+        """Снимает подсветку при очистке буфера."""
+        if self._active_clipboard_row != -1:
+            for col in range(self.columnCount()):
+                item = self.item(self._active_clipboard_row, col)
+                if item:
+                    item.setBackground(Qt.GlobalColor.white)
+            self._active_clipboard_row = -1
+
 
     def display_data(self, records, copy_callback=None, password_getter=None):
         #Обновление таблицы при поиске
@@ -225,15 +268,21 @@ class SecureTable(QTableWidget):
 
         menu = QMenu(self)
 
-        copy_action = menu.addAction("Копировать пароль")
-        edit_action = menu.addAction("Редактировать")
-        delete_action = menu.addAction("Удалить")
+        copy_pass_action = menu.addAction("🔑 Копировать пароль")
+        copy_user_action = menu.addAction("👤 Копировать логин")
+        copy_all_action = menu.addAction("📋 Копировать всё")
+        menu.addSeparator()
+        edit_action = menu.addAction("✏️ Редактировать")
+        delete_action = menu.addAction("🗑️ Удалить")
 
         action = menu.exec(self.mapToGlobal(pos))
 
-        if action == copy_action:
-            # Испускаем сигнал вместо прямой работы с буфером
-            self.copy_requested.emit(record_id)
+        if action == copy_pass_action:
+            self.copy_password_requested.emit(record_id)
+        elif action == copy_user_action:
+            self.copy_username_requested.emit(record_id)
+        elif action == copy_all_action:
+            self.copy_all_requested.emit(record_id)
         elif action == edit_action:
             self.edit_requested.emit(record_id)
         elif action == delete_action:

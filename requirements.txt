@@ -20,3 +20,6 @@ python-Levenshtein==0.25.0
 pytest==8.0.0
 pytest-qt==4.4.0
 pytest-cov==4.1.0
+
+
+notify-py==0.3.42

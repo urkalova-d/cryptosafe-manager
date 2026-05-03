@@ -27,6 +27,10 @@ class ClipboardService(QObject):
     clipboard_cleared = pyqtSignal()
     timer_updated = pyqtSignal(int)
 
+    copy_username_requested = pyqtSignal(int)
+    copy_all_requested = pyqtSignal(int)
+    warning_5_seconds = pyqtSignal()  # Сигнал за 5 секунд до очистки
+
     # --- Defense Signals ---
     threat_detected = pyqtSignal(int, str)  # (ThreatLevel, message)
     block_state_changed = pyqtSignal(bool)
@@ -51,11 +55,17 @@ class ClipboardService(QObject):
         self._secure_data: Optional[bytearray] = None
         self._current_entry_id: Optional[int] = None
 
+        # NEW: Храним тип скопированных данных ('password', 'username', 'all')
+        self._current_data_type: Optional[str] = None
+
         # Timer Logic
         self._clear_timer = QTimer(self)
         self._clear_timer.timeout.connect(self._tick)
         self._remaining_seconds = 0
         self._timeout_duration = self._load_timeout()
+
+        # Флаг для отслеживания предупреждения
+        self._warning_shown = False
 
         # Monitor Integration
         self.monitor.content_changed.connect(self._on_external_clipboard_change)
@@ -96,7 +106,7 @@ class ClipboardService(QObject):
     def set_ephemeral_mode(self, enabled: bool):
         """Включение/выключение эфемерного режима."""
         self._ephemeral_mode = enabled
-        self.ephemeral_mode_changed.emit(enabled)
+
 
         if enabled:
             # При включении очищаем системный буфер для безопасности
@@ -106,6 +116,7 @@ class ClipboardService(QObject):
         else:
             self._clear_ephemeral()
             print("[ClipboardService] Ephemeral mode DISABLED")
+        self.ephemeral_mode_changed.emit(enabled)
 
     def is_ephemeral_mode(self) -> bool:
         return self._ephemeral_mode
@@ -127,42 +138,51 @@ class ClipboardService(QObject):
 
     # --- Main Copy Logic ---
 
+        # --- Main Copy Logic ---
+
     def copy_password(self, entry_id: int, password: str):
-        """
-        Копирование пароля. 
-        Если включен эфемерный режим - сохраняет только в памяти.
-        Если обычный режим - в системный буфер.
-        """
-        # Эфемерный режим
+        """Копирование пароля."""
+        self._copy_data(entry_id, password, 'password')
+
+    def copy_username(self, entry_id: int, username: str):
+        """Копирование имени пользователя (Sprint 5)."""
+        self._copy_data(entry_id, username, 'username')
+
+    def copy_all(self, entry_id: int, data_str: str):
+        """Копирование всех данных (Sprint 5). data_str = 'username:password'."""
+        self._copy_data(entry_id, data_str, 'all')
+
+    def _copy_data(self, entry_id: int, data: str, data_type: str):
+        """Внутренняя логика копирования."""
         if self._ephemeral_mode:
-            self._clear_ephemeral()
-            self._ephemeral_password = password
-            self._ephemeral_entry_id = entry_id
-
-            # Запускаем таймер жизни эфемерного пароля
-            if self._timeout_duration > 0:
-                self._ephemeral_timer.start(self._timeout_duration * 1000)
-
-            self.clipboard_copied.emit(entry_id)
-            print(f"[ClipboardService] Password stored in EPHEMERAL memory (timeout: {self._timeout_duration}s)")
+            # В эфемерном режиме сохраняем только пароль, остальные типы игнорируем или обрабатываем иначе
+            if data_type == 'password':
+                self._clear_ephemeral()
+                self._ephemeral_password = data
+                self._ephemeral_entry_id = entry_id
+                if self._timeout_duration > 0:
+                    self._ephemeral_timer.start(self._timeout_duration * 1000)
+                self.clipboard_copied.emit(entry_id)
             return
 
         # Обычный режим
         self._cleanup_memory()
-        self._secure_data = bytearray(password.encode('utf-8'))
+        self._secure_data = bytearray(data.encode('utf-8'))
         self._current_entry_id = entry_id
+        self._current_data_type = data_type
+        self._warning_shown = False  # Сброс флага предупреждения
 
-        success = self.adapter.copy_to_clipboard(password)
+        success = self.adapter.copy_to_clipboard(data)
 
         if success:
-            self.monitor.update_internal_state(password)
+            self.monitor.update_internal_state(data)
             if self._timeout_duration > 0:
                 self._remaining_seconds = self._timeout_duration
                 self._clear_timer.start(1000)
             self.clipboard_copied.emit(entry_id)
         else:
             self._cleanup_memory()
-            raise RuntimeError("Failed to copy password to clipboard")
+            raise RuntimeError("Failed to copy to clipboard")
 
     def clear_now(self):
         """Принудительная очистка обоих буферов."""
@@ -174,6 +194,12 @@ class ClipboardService(QObject):
     def _tick(self):
         self._remaining_seconds -= 1
         self.timer_updated.emit(self._remaining_seconds)
+
+        # Sprint 5: Предупреждение за 5 секунд
+        if self._remaining_seconds == 5 and not self._warning_shown:
+            self.warning_5_seconds.emit()
+            self._warning_shown = True
+
         if self._remaining_seconds <= 0:
             self._perform_clear()
 
@@ -190,6 +216,8 @@ class ClipboardService(QObject):
                 self._secure_data[i] = 0
             self._secure_data = None
         self._current_entry_id = None
+        self._current_data_type = None
+        self._warning_shown = False
         self.timer_updated.emit(0)
 
     def _on_external_clipboard_change(self, new_content: str):
@@ -201,3 +229,11 @@ class ClipboardService(QObject):
                     self._cleanup_memory()
             except Exception:
                 pass
+
+    # API для UI индикации
+    def get_current_entry_id(self) -> Optional[int]:
+        return self._current_entry_id
+
+    def get_current_data_type(self) -> Optional[str]:
+        return self._current_data_type
+
