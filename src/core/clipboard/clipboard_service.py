@@ -16,6 +16,27 @@ class ThreatLevel:
     HIGH = 3
     CRITICAL = 4
 
+SECURITY_PROFILES = {
+    "standard": {
+        "name": "Standard",
+        "timeout": 30,
+        "monitor_level": 1, # Basic
+        "anti_screenshot": False
+    },
+    "secure": {
+        "name": "Secure",
+        "timeout": 15,
+        "monitor_level": 2, # Enhanced
+        "anti_screenshot": False
+    },
+    "public": {
+        "name": "Public Computer",
+        "timeout": 5,
+        "monitor_level": 3, # Paranoid
+        "anti_screenshot": True
+    }
+}
+
 
 class ClipboardService(QObject):
     """
@@ -51,6 +72,11 @@ class ClipboardService(QObject):
 
         self._key_storage_ref = None
 
+        # --- Configuration State ---
+        self._security_profile = "standard"
+        self._anti_screenshot_enabled = False
+        self._notifications_enabled = True
+
         # --- Ephemeral Mode State (MON-4) ---
         self._ephemeral_mode = False
         self._ephemeral_password: Optional[str] = None
@@ -69,6 +95,7 @@ class ClipboardService(QObject):
         self._clear_timer = QTimer(self)
         self._clear_timer.timeout.connect(self._tick)
         self._remaining_seconds = 0
+
         self._timeout_duration = self._load_timeout()
 
         # Флаг для отслеживания предупреждения
@@ -89,18 +116,55 @@ class ClipboardService(QObject):
         """Передача ссылки на KeyStorage для проверки блокировки."""
         self._key_storage_ref = key_storage
 
-    # --- Settings ---
     def set_db_helper(self, db_helper):
         self.db_helper = db_helper
         self._timeout_duration = self._load_timeout()
 
     def _load_timeout(self) -> int:
+        """Загружает таймаут из БД. По умолчанию 30 секунд."""
         if not self.db_helper: return 30
         val = self.db_helper.get_setting("clipboard_timeout")
         try:
             return int(val) if val else 30
         except ValueError:
             return 30
+
+    # --- Settings ---
+    def load_settings(self):
+        """Load settings from DB on startup."""
+        if not self.db_helper: return
+
+        profile = self.db_helper.get_setting("security_profile")
+        if profile and profile in SECURITY_PROFILES:
+            self.set_security_profile(profile, save=False)
+        else:
+            self.set_security_profile("standard", save=False)
+
+        notif = self.db_helper.get_setting("notifications_enabled")
+        # По умолчанию True, если настройки нет или она "1"
+        self._notifications_enabled = (notif is None or notif == "1")
+
+    def set_security_profile(self, profile_key: str, save: bool = True):
+        """Apply a security profile."""
+        if profile_key not in SECURITY_PROFILES:
+            print(f"[ClipboardService] Invalid profile: {profile_key}")
+            return
+
+        self._security_profile = profile_key
+        config = SECURITY_PROFILES[profile_key]
+
+        self._timeout_duration = config["timeout"]
+        self._anti_screenshot_enabled = config["anti_screenshot"]
+
+        print(f"[ClipboardService] Profile set to: {config['name']} (Timeout: {self._timeout_duration}s)")
+
+        if save and self.db_helper:
+            self.db_helper.save_setting("security_profile", profile_key)
+
+        #self.config_changed.emit(config)
+
+    def get_current_profile(self) -> str:
+        return self._security_profile
 
     def set_timeout(self, seconds: int):
         if seconds < 5: seconds = 5
@@ -112,6 +176,15 @@ class ClipboardService(QObject):
     def get_timeout(self) -> int:
         return self._timeout_duration
 
+    def are_notifications_enabled(self) -> bool:
+        """Req 7.1: Проверка, включены ли уведомления."""
+        return self._notifications_enabled
+
+    def set_notifications_enabled(self, enabled: bool):
+        """Req 7.1: Включение/выключение уведомлений."""
+        self._notifications_enabled = enabled
+        if self.db_helper:
+            self.db_helper.save_setting("notifications_enabled", "1" if enabled else "0")
     # --- MON-4: Ephemeral Mode ---
 
     def set_ephemeral_mode(self, enabled: bool):
@@ -168,15 +241,13 @@ class ClipboardService(QObject):
         print(f"[ClipboardService] copy_all called with ID: {entry_id}")
         self._copy_data(entry_id, data_str, 'all')
 
-
     def _copy_data(self, entry_id: int, data: str, data_type: str):
         print(f"[ClipboardService] _copy_data START. ID: {entry_id}, Type: {data_type}")
-        """Внутренняя логика копирования."""
+
         if not self._check_vault_unlocked():
             raise PermissionError("Vault is locked. Cannot copy to clipboard.")
 
         if self._ephemeral_mode:
-            # В эфемерном режиме сохраняем только пароль, остальные типы игнорируем или обрабатываем иначе
             if data_type == 'password':
                 self._clear_ephemeral()
                 self._ephemeral_password = data
@@ -195,11 +266,8 @@ class ClipboardService(QObject):
         plain_bytes = data.encode('utf-8')
 
         # 3. XOR Obfuscation (Req 6.2)
-        # Генерируем случайную маску той же длины
         if len(plain_bytes) > 0:
             self._xor_mask = bytearray(secrets.token_bytes(len(plain_bytes)))
-
-            # Применяем XOR: result = data ^ mask
             obfuscated_bytes = bytearray()
             for i in range(len(plain_bytes)):
                 obfuscated_bytes.append(plain_bytes[i] ^ self._xor_mask[i])
@@ -208,12 +276,9 @@ class ClipboardService(QObject):
             obfuscated_bytes = bytearray()
 
         # 4. Secure Memory Storage (Req 6.1)
-        # Мы используем упрощенный вариант защиты через KeyStorage если он есть
-        # или просто храним bytearray. KeyStorage.protect_data требует экземпляр.
         if self._key_storage_ref:
             self._secure_data = self._key_storage_ref.protect_data(bytes(obfuscated_bytes))
         else:
-            # Fallback если key_storage не передан (не должно быть)
             self._secure_data = obfuscated_bytes
 
         self._current_entry_id = entry_id
@@ -229,11 +294,13 @@ class ClipboardService(QObject):
                 self._remaining_seconds = self._timeout_duration
                 self._clear_timer.start(1000)
 
-            # --- NEW: Enable Anti-Screenshot ---
-            self.protection_enabled.emit()
+            # --- Anti-Screenshot Logic (Req 7.1) ---
+            # Включаем защиту ТОЛЬКО если это разрешено профилем
+            if self._anti_screenshot_enabled:
+                self.protection_enabled.emit()
 
             self.clipboard_copied.emit(entry_id)
-            print("[ClipboardService] Copy SUCCESS. Protection ENABLED.")
+            print("[ClipboardService] Copy SUCCESS.")
         else:
             self._cleanup_memory()
             raise RuntimeError("Failed to copy to clipboard")

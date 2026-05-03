@@ -4,6 +4,7 @@ import traceback
 import platform
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import QSettings, QStringListModel
+from src.gui.settings_dialog import SettingsDialog
 
 from src.database.db import DatabaseHelper
 from src.gui.setup_wizard import SetupWizard
@@ -83,6 +84,8 @@ class MainWindow(QMainWindow):
         # Передаем ссылку на хранилище ключей для проверки блокировки
         self.clipboard_service.set_key_storage(self.key_manager.storage)
 
+        self.clipboard_service.load_settings()
+
         # 4. Подключение сигналов (теперь self.table существует)
         self.clipboard_service.timer_updated.connect(self.update_timer_label_service)
         self.clipboard_service.clipboard_cleared.connect(self.on_clipboard_cleared)
@@ -117,6 +120,8 @@ class MainWindow(QMainWindow):
 
         self.hide()
         QTimer.singleShot(100, self.check_first_run)
+        # --- Load Settings on Startup ---
+
 
     def init_ui(self):
 
@@ -228,7 +233,8 @@ class MainWindow(QMainWindow):
         # просмотр
         view_menu = menubar.addMenu("Просмотр")
         view_menu.addAction("Журналы")
-        view_menu.addAction("Настройки")
+        settings_action = view_menu.addAction("⚙️ Настройки")
+        settings_action.triggered.connect(self.open_settings_dialog)
 
         # справка
         help_menu = menubar.addMenu("Справка")
@@ -375,9 +381,7 @@ class MainWindow(QMainWindow):
         else:
             self.timer_label.setText("")
 
-    def on_clipboard_cleared(self):
-        """Слот для уведомления об очистке (вызывается сервисом)."""
-        self.statusBar().showMessage("Буфер обмена очищен", 3000)
+
 
     def copy_password(self, password):  # функция копирования запускающая процесс
         QApplication.clipboard().setText(password)
@@ -1009,37 +1013,40 @@ class MainWindow(QMainWindow):
             password = entry_data.get('password', '')
             if password:
                 self.clipboard_service.copy_password(entry_id, password)
-                self.show_toast("🔑 Пароль скопирован")
+                # ПРОВЕРКА: Показываем уведомление только если включено
+                if self.clipboard_service.are_notifications_enabled():
+                    self.show_toast("🔑 Пароль скопирован")
             else:
                 self.statusBar().showMessage("Пароль пуст", 3000)
         except Exception as e:
             print(f"Error copying password: {e}")
 
     def copy_username_to_clipboard(self, entry_id):
-        """Копирует только имя пользователя."""
         if not entry_id: return
         try:
             entry_data = self.entry_manager.get_entry(entry_id)
             username = entry_data.get('username', '')
             if username:
                 self.clipboard_service.copy_username(entry_id, username)
-                self.show_toast("👤 Логин скопирован")
+                # ПРОВЕРКА
+                if self.clipboard_service.are_notifications_enabled():
+                    self.show_toast("👤 Логин скопирован")
             else:
                 self.statusBar().showMessage("Логин пуст", 3000)
         except Exception as e:
             print(f"Error copying username: {e}")
 
     def copy_all_to_clipboard(self, entry_id):
-        """Копирует логин и пароль (разделенные переносом строки или табом)."""
         if not entry_id: return
         try:
             entry_data = self.entry_manager.get_entry(entry_id)
             username = entry_data.get('username', '')
             password = entry_data.get('password', '')
-            # Формат: username:password (или другой удобный)
             data_str = f"{username}\t{password}"
             self.clipboard_service.copy_all(entry_id, data_str)
-            self.show_toast("📋 Данные скопированы")
+            # ПРОВЕРКА
+            if self.clipboard_service.are_notifications_enabled():
+                self.show_toast("📋 Данные скопированы")
         except Exception as e:
             print(f"Error copying all: {e}")
 
@@ -1047,7 +1054,7 @@ class MainWindow(QMainWindow):
         """Обновление UI после копирования."""
         # Подсвечиваем строку в таблице
         self.table.highlight_row(entry_id)
-        # Обновляем превью в статус-баре (реализуем ниже)
+        # Обновляем превью в статус-баре
         self.update_clipboard_preview()
 
     def on_clipboard_cleared(self):
@@ -1055,12 +1062,13 @@ class MainWindow(QMainWindow):
         self.table.remove_highlight()
         self.statusBar().showMessage("Буфер очищен", 3000)
         self.clear_clipboard_preview()
-        self.show_toast("🧹 Буфер очищен")
+        if self.clipboard_service.are_notifications_enabled():
+            self.show_toast("🧹 Буфер очищен")
 
     def show_clear_warning(self):
         """Предупреждение за 5 секунд до очистки."""
-        self.show_toast("⚠️ Буфер очистится через 5 секунд!")
-        # Можно добавить мигание строки в таблице
+        if self.clipboard_service.are_notifications_enabled():
+            self.show_toast("⚠️ Буфер очистится через 5 секунд!")
         self.statusBar().showMessage("⚠️ Внимание! Буфер очистится через 5 секунд", 5000)
 
     def show_toast(self, message: str):
@@ -1189,8 +1197,23 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"[MainWindow] Error disabling Anti-Screenshot: {e}")
 
+    def open_settings_dialog(self):
+        """Req 7: Opens the configuration dialog."""
+        if not self.auth_service.is_authenticated():
+            QMessageBox.warning(self, "Ошибка", "Сначала войдите в систему.")
+            return
 
+        dialog = SettingsDialog(self.clipboard_service, self.db_helper, self)
 
+        # Подключаем сигнал пересоздания иконок/индикаторов если нужно
+        dialog.settings_updated.connect(self._on_settings_updated)
 
+        if dialog.exec():
+            print("[MainWindow] Settings updated successfully.")
+
+    def _on_settings_updated(self):
+        """Callback after settings are saved."""
+        # Можно обновить UI элементы, зависящие от настроек
+        pass
 
 
