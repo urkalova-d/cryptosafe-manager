@@ -15,7 +15,7 @@ class LockReason(Enum):
 
 
 class KeyStorage:
-    INACTIVITY_TIMEOUT = 3600
+    INACTIVITY_TIMEOUT =3600
 
     def __init__(self):
         # инициализация атрибутов
@@ -151,6 +151,54 @@ class KeyStorage:
             print(f"Memory unlock failed: {e}")
             return False
         return False
+
+    def protect_data(self, data: bytes) -> Optional[bytearray]:
+        """Защищает произвольные данные (например, для буфера обмена)."""
+        if not data:
+            return None
+
+        buffer = bytearray(data)
+
+        if self._memory_protection_available:
+            # CryptProtectMemory требует выравнивания данных (padding)
+            # Для CRYPTPROTECTMEMORY_BLOCK_SIZE (обычно 16 байт на Windows)
+            if self._protection_method == "CryptProtectMemory":
+                # Вычисляем необходимый размер (кратен 16)
+                remainder = len(buffer) % 16
+                if remainder != 0:
+                    padding_len = 16 - remainder
+                    # Добавляем нули в конец для выравнивания
+                    buffer.extend(bytearray(padding_len))
+
+            if self._lock_memory(buffer):
+                return buffer
+            else:
+                print("[KeyStorage] Warning: Failed to lock external data memory")
+                return buffer
+        return buffer
+
+    def unprotect_data(self, buffer: bytearray) -> Optional[bytes]:
+        """Снимает защиту и возвращает копию данных."""
+        if not buffer:
+            return None
+
+        if self._memory_protection_available:
+            self._unlock_memory(buffer)
+
+        return bytes(buffer)
+
+    def zero_buffer(self, buffer: bytearray):
+        """Безопасная очистка произвольного буфера."""
+        if buffer:
+            try:
+                # Если память была защищена, снимаем защиту перед затиранием
+                if self._memory_protection_available:
+                    self._unlock_memory(buffer)
+
+                for i in range(len(buffer)):
+                    buffer[i] = 0
+            except Exception as e:
+                print(f"Error zeroing buffer: {e}")
 
     def set_keys(self, auth_key: Optional[bytes], enc_key: Optional[bytes]):
         #Установка ключей с защитой памяти

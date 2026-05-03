@@ -105,6 +105,8 @@ class SecureTable(QTableWidget):
         copy_pass_btn.setFixedSize(QSize(28, 24))
         if record_id is not None:
             copy_pass_btn.clicked.connect(lambda checked=False, eid=record_id: self.copy_password_requested.emit(eid))
+        else:
+            print(f"[SecureTable] Warning: record_id is None for row {row_position}")
 
         # Кнопка копирования логина
         copy_user_btn = QPushButton("👤")

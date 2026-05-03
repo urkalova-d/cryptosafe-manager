@@ -79,6 +79,9 @@ class MainWindow(QMainWindow):
         self.clipboard_monitor = ClipboardMonitor(self.platform_adapter)
         self.clipboard_service = ClipboardService(self.platform_adapter, self.clipboard_monitor, self.db_helper)
 
+        # Передаем ссылку на хранилище ключей для проверки блокировки
+        self.clipboard_service.set_key_storage(self.key_manager.storage)
+
         # 4. Подключение сигналов (теперь self.table существует)
         self.clipboard_service.timer_updated.connect(self.update_timer_label_service)
         self.clipboard_service.clipboard_cleared.connect(self.on_clipboard_cleared)
@@ -995,6 +998,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Нет данных в эфемерном буфере", 2000)
 
     def copy_password_to_clipboard(self, entry_id):
+        print(f"[MainWindow] copy_password_to_clipboard slot hit! ID: {entry_id}")
         """Копирует только пароль."""
         if not entry_id: return
         try:
