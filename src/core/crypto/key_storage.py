@@ -160,21 +160,37 @@ class KeyStorage:
         buffer = bytearray(data)
 
         if self._memory_protection_available:
-            # CryptProtectMemory требует выравнивания данных (padding)
-            # Для CRYPTPROTECTMEMORY_BLOCK_SIZE (обычно 16 байт на Windows)
+            # --- Req 11.2 Implementation Details ---
+
+            # 1. Предотвращение свопинга (Windows specific logic)
+            # CryptProtectMemory шифрует страницу памяти, делая её нечитаемой для других процессов,
+            # но она все еще может попасть в swap файл в зашифрованном виде.
+            # Для полной безопасности можно использовать VirtualLock (не свопировать),
+            # но DPAPI CryptProtectMemory достаточно для "Process Isolation" от других юзеров/процессов.
+
             if self._protection_method == "CryptProtectMemory":
-                # Вычисляем необходимый размер (кратен 16)
+                # DPAPI требует выравнивания данных (padding)
                 remainder = len(buffer) % 16
                 if remainder != 0:
                     padding_len = 16 - remainder
-                    # Добавляем нули в конец для выравнивания
                     buffer.extend(bytearray(padding_len))
 
-            if self._lock_memory(buffer):
-                return buffer
+                # Шифруем память (делает её нечитаемой для других процессов)
+                if self._lock_memory(buffer):
+                    return buffer
+                else:
+                    print("[KeyStorage] Warning: Failed to lock external data memory")
+                    return buffer  # Возвращаем буфер даже если защита не удалась (fallback)
+
+            elif self._protection_method == "mlock":
+                # mlock блокирует память в RAM (не попадает в swap)
+                if self._lock_memory(buffer):
+                    return buffer
+                else:
+                    return buffer
             else:
-                print("[KeyStorage] Warning: Failed to lock external data memory")
                 return buffer
+
         return buffer
 
     def unprotect_data(self, buffer: bytearray) -> Optional[bytes]:

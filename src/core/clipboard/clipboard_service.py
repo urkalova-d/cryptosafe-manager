@@ -230,6 +230,16 @@ class ClipboardService(QObject):
             return False
         return True
 
+    def on_vault_lock(self):
+        """
+        Вызывается внешним компонентом (например, MainWindow) при блокировке хранилища.
+        Мгновенно и безопасно очищает все буферы.
+        """
+        print("[ClipboardService] Vault lock detected. Clearing clipboard immediately.")
+        self.clear_now()
+        # Дополнительно логируем событие безопасности
+        self._log_security_event("VAULT_LOCK_CLEAR", None, "Clipboard cleared due to vault lock")
+
     # --- Main Copy Logic ---
     def copy_password(self, entry_id: int, password: str):
         """Legacy метод для совместимости."""
@@ -287,6 +297,18 @@ class ClipboardService(QObject):
 
 
     def _copy_data(self, entry_id: int, data: str, data_type: str):
+        # --- Req 11.4: Input Validation ---
+        if not isinstance(entry_id, int) or entry_id < 0:
+            raise ValueError("Invalid Entry ID")
+
+        if not isinstance(data, str):
+            # Защита от передачи None или объектов
+            data = str(data) if data is not None else ""
+
+        # Защита от переполнения (ограничим разумным пределом 1MB для паролей)
+        MAX_CLIPBOARD_SIZE = 1024 * 1024  # 1 MB
+        if len(data) > MAX_CLIPBOARD_SIZE:
+            raise ValueError("Data exceeds maximum safe clipboard size")
         if not self._check_vault_unlocked():
             raise PermissionError("Vault is locked. Cannot copy to clipboard.")
 

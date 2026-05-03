@@ -189,7 +189,8 @@ class MainWindow(QMainWindow):
     def on_user_logged_out(self):
         # для события выхода
         print("Событие: UserLoggedOut")
-        self.clipboard_service.clear_now()
+        if hasattr(self, 'clipboard_service'):
+            self.clipboard_service.on_vault_lock()
         self.hide()
         QMessageBox.information(self, "Сессия завершена", "Вы были автоматически вышли из системы.")
         self.show_login_dialog()
