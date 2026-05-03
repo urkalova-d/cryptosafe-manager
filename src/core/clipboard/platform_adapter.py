@@ -22,8 +22,18 @@ class PlatformAdapter:
             return True
         except Exception as e:
             print(f"[PlatformAdapter] Error copying to clipboard: {e}")
-            return False
 
+        try:
+            import pyperclip
+            pyperclip.copy(text)
+            print("[PlatformAdapter] Fallback to pyperclip successful.")
+            return True
+        except ImportError:
+            print("[PlatformAdapter] CRITICAL: pyperclip not installed. Fallback unavailable.")
+        except Exception as e:
+            print(f"[PlatformAdapter] CRITICAL: Fallback failed: {e}")
+
+        return False
     def clear_clipboard(self) -> bool:
         """
         Безопасно очищает буфер обмена.
@@ -34,16 +44,23 @@ class PlatformAdapter:
             from PyQt6.QtWidgets import QApplication
             clipboard = QApplication.clipboard()
 
-            # 1. Копируем пустую строку (или пробел)
-            clipboard.setText("")
-
-            # 3. Только после перезаписи вызываем clear
-            clipboard.clear()
-
-            return True
+            if clipboard:
+                # Перезапись пустой строкой + Clear
+                clipboard.setText("")
+                clipboard.clear()
+                return True
         except Exception as e:
             print(f"[PlatformAdapter] Error clearing clipboard: {e}")
-            return False
+
+        try:
+            import pyperclip
+            # pyperclip.copy перезаписывает содержимое
+            pyperclip.copy("")
+            return True
+        except Exception as e:
+            print(f"[PlatformAdapter] Fallback clear failed: {e}")
+
+        return False
 
     def get_clipboard_content(self) -> Optional[str]:
         """Получает текущее содержимое буфера (для проверки)."""
@@ -51,6 +68,12 @@ class PlatformAdapter:
             from PyQt6.QtWidgets import QApplication
             clipboard = QApplication.clipboard()
             return clipboard.text()
+        except Exception:
+            pass
+
+        try:
+            import pyperclip
+            return pyperclip.paste()
         except Exception:
             return None
 

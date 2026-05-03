@@ -61,7 +61,7 @@ class ClipboardService(QObject):
     # --- NEW: Anti-Screenshot Signals ---
     protection_enabled = pyqtSignal()  # Сигнал: включить защиту окна
     protection_disabled = pyqtSignal()  # Сигнал: выключить защиту окна
-
+    error_occurred = pyqtSignal(str)
     _instance = None
 
     def __init__(self, platform_adapter: PlatformAdapter, monitor: ClipboardMonitor, db_helper=None):
@@ -323,56 +323,66 @@ class ClipboardService(QObject):
             return
 
         # --- Обычный режим с защитой памяти ---
+        try:
+            # 1. Очистка старых данных
+            self._cleanup_memory()
 
-        # 1. Очистка старых данных
-        self._cleanup_memory()
+            # 2. Подготовка данных
+            plain_bytes = data.encode('utf-8')
+            data_len = len(plain_bytes)
 
-        # 2. Подготовка данных
-        plain_bytes = data.encode('utf-8')
-        data_len = len(plain_bytes)
-
-        # 3. XOR Obfuscation (Req 6.2)
-        if data_len > 0:
-            try:
+            # 3. XOR Obfuscation (Req 6.2)
+            if data_len > 0:
                 self._xor_mask = secrets.token_bytes(data_len)
                 # Генерация XOR маски и применение в одну строку (быстрее в CPython)
                 obfuscated_bytes = bytes(p ^ m for p, m in zip(plain_bytes, self._xor_mask))
-            except MemoryError:
-                print("[ClipboardService] Memory Error during XOR")
-                raise RuntimeError("Data too large for secure clipboard")
-        else:
-            self._xor_mask = bytearray()
-            obfuscated_bytes = bytearray()
+            else:
+                self._xor_mask = bytearray()
+                obfuscated_bytes = bytearray()
 
-        # 4. Secure Memory Storage (Req 6.1)
-        if self._key_storage_ref:
-            self._secure_data = self._key_storage_ref.protect_data(bytes(obfuscated_bytes))
-        else:
-            self._secure_data = obfuscated_bytes
+            # 4. Secure Memory Storage (Req 6.1)
+            if self._key_storage_ref:
+                self._secure_data = self._key_storage_ref.protect_data(bytes(obfuscated_bytes))
+            else:
+                self._secure_data = obfuscated_bytes
 
-        self._current_entry_id = entry_id
-        self._current_data_type = data_type
-        self._warning_shown = False
+            self._current_entry_id = entry_id
+            self._current_data_type = data_type
+            self._warning_shown = False
 
-        # 5. Копирование в системный буфер
-        success = self.adapter.copy_to_clipboard(data)
+            # 5. Копирование в системный буфер
+            success = self.adapter.copy_to_clipboard(data)
 
-        if success:
-            self.monitor.update_internal_state(data)
-            if self._timeout_duration > 0:
-                self._remaining_seconds = self._timeout_duration
-                self._clear_timer.start(1000)
+            if success:
+                self.monitor.update_internal_state(data)
+                if self._timeout_duration > 0:
+                    self._remaining_seconds = self._timeout_duration
+                    self._clear_timer.start(1000)
 
-            # --- Anti-Screenshot Logic (Req 7.1) ---
-            # Включаем защиту ТОЛЬКО если это разрешено профилем
-            if self._anti_screenshot_enabled:
-                self.protection_enabled.emit()
+                # --- Anti-Screenshot Logic (Req 7.1) ---
+                if self._anti_screenshot_enabled:
+                    self.protection_enabled.emit()
 
-            self.clipboard_copied.emit(entry_id)
-            print("[ClipboardService] Copy SUCCESS.")
-        else:
+                self.clipboard_copied.emit(entry_id)
+                print("[ClipboardService] Copy SUCCESS.")
+            else:
+                # --- Req 12.4: Log failure ---
+                self._log_security_event("COPY_FAILED", entry_id, "Platform adapter returned False")
+                self._cleanup_memory()
+                raise RuntimeError("Failed to copy to clipboard")
+
+        except MemoryError:
+            # --- Req 12.4: Log critical error ---
+            self._log_security_event("MEMORY_ERROR", entry_id, "Out of memory during XOR obfuscation")
             self._cleanup_memory()
-            raise RuntimeError("Failed to copy to clipboard")
+            raise RuntimeError("System out of memory. Data too large.")
+
+        except Exception as e:
+            # --- Req 12.4: Log unexpected errors ---
+            self._log_security_event("UNEXPECTED_ERROR", entry_id, f"Exception: {str(e)}")
+            self._cleanup_memory()
+            # Перебрасываем исключение, чтобы UI мог его обработать
+            raise e
 
     def clear_now(self):
         """Принудительная очистка обоих буферов."""
@@ -394,15 +404,31 @@ class ClipboardService(QObject):
             self._perform_clear()
 
     def _perform_clear(self):
+        """Req 12.2: Recovery mechanism."""
         self._clear_timer.stop()
-        self.adapter.clear_clipboard()
+
+        # Попытка очистки
+        clear_success = self.adapter.clear_clipboard()
+
         self.protection_disabled.emit()
+
         if self._current_entry_id:
             self._log_clipboard_action("CLEAR", self._current_entry_id, self._current_data_type)
 
         self._cleanup_memory()
         self.clipboard_cleared.emit()
-        print("[ClipboardService] Clipboard cleared.")
+
+        # --- Req 12.2: Verification & Warning ---
+        if not clear_success:
+            msg = "CRITICAL: Failed to clear system clipboard! Please clear it manually (Ctrl+V in a text editor)."
+            print(f"[ClipboardService] {msg}")
+            # Логируем инцидент
+            self._log_security_event("CLEAR_FAILED", self._current_entry_id, "Adapter failed to clear clipboard")
+            # Предупреждаем UI
+            self.threat_detected.emit(ThreatLevel.HIGH, "Failed to clear clipboard. Manual clearing required.")
+            self.error_occurred.emit(msg)
+        else:
+            print("[ClipboardService] Clipboard cleared.")
 
     def _cleanup_memory(self):
         """Req 10.3: Efficient memory zeroing."""

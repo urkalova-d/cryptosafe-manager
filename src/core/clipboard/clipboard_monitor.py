@@ -21,19 +21,34 @@ class ClipboardMonitor(QObject):
         self._last_content_hash: Optional[int] = None
         self._is_monitoring = False
         # Инициализируем доступ к буферу обмена Qt
-        self._clipboard = QApplication.clipboard()
+        self._clipboard = None
+
+        try:
+            self._clipboard = QApplication.clipboard()
+            if not self._clipboard:
+                print("[ClipboardMonitor] WARNING: QApplication.clipboard() returned None. Monitoring disabled.")
+        except Exception as e:
+            print(f"[ClipboardMonitor] CRITICAL: Failed to access clipboard API: {e}")
 
     def start_monitoring(self):
         """Запуск мониторинга. Подключаемся к сигналу Qt."""
-        if not self._is_monitoring:
-            # Сохраняем текущее состояние, чтобы не детектировать его как изменение сразу же
-            if self._clipboard:
-                self._last_content_hash = self._hash_content(self._clipboard.text())
-                # Подключаем слот к системному сигналу изменения буфера
-                self._clipboard.dataChanged.connect(self._on_clipboard_change)
+        if self._is_monitoring:
+            return
 
+        if not self._clipboard:
+            print("[ClipboardMonitor] Cannot start monitoring: Clipboard API unavailable.")
+            return
+
+        try:
+            # Сохраняем текущее состояние
+            self._last_content_hash = self._hash_content(self._clipboard.text())
+            # Подключаемся к сигналу
+            self._clipboard.dataChanged.connect(self._on_clipboard_change)
             self._is_monitoring = True
             print("[ClipboardMonitor] Started (Event-driven mode)")
+        except Exception as e:
+            print(f"[ClipboardMonitor] Error starting monitoring: {e}. Running in degraded mode.")
+            self._is_monitoring = False
 
     def stop_monitoring(self):
         """Остановка мониторинга."""
@@ -66,11 +81,8 @@ class ClipboardMonitor(QObject):
             print(f"[ClipboardMonitor] Error handling change: {e}")
 
     def update_internal_state(self, content: str):
-        """
-        Обновляет внутренний хеш после легального копирования нашим сервисом.
-        Это предотвращает ложное срабатывание защиты.
-        """
-        self._last_content_hash = self._hash_content(content)
+        if self._clipboard:
+            self._last_content_hash = self._hash_content(content)
 
     def _hash_content(self, content: str) -> int:
         """Быстрый хеш для сравнения."""
