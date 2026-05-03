@@ -37,6 +37,10 @@ class ClipboardService(QObject):
     block_state_changed = pyqtSignal(bool)
     ephemeral_mode_changed = pyqtSignal(bool)
 
+    # --- NEW: Anti-Screenshot Signals ---
+    protection_enabled = pyqtSignal()  # Сигнал: включить защиту окна
+    protection_disabled = pyqtSignal()  # Сигнал: выключить защиту окна
+
     _instance = None
 
     def __init__(self, platform_adapter: PlatformAdapter, monitor: ClipboardMonitor, db_helper=None):
@@ -224,7 +228,12 @@ class ClipboardService(QObject):
             if self._timeout_duration > 0:
                 self._remaining_seconds = self._timeout_duration
                 self._clear_timer.start(1000)
+
+            # --- NEW: Enable Anti-Screenshot ---
+            self.protection_enabled.emit()
+
             self.clipboard_copied.emit(entry_id)
+            print("[ClipboardService] Copy SUCCESS. Protection ENABLED.")
         else:
             self._cleanup_memory()
             raise RuntimeError("Failed to copy to clipboard")
@@ -251,6 +260,7 @@ class ClipboardService(QObject):
     def _perform_clear(self):
         self._clear_timer.stop()
         self.adapter.clear_clipboard()
+        self.protection_disabled.emit()
         self._cleanup_memory()
         self.clipboard_cleared.emit()
         print("[ClipboardService] Clipboard cleared.")
@@ -278,25 +288,18 @@ class ClipboardService(QObject):
         self.timer_updated.emit(0)
 
     def _on_external_clipboard_change(self, new_content: str):
-        # Если у нас есть защищенные данные, мы не можем просто сравнить строки.
-        # Нужно расшифровать, сравнить, и сразу забыть.
+        # Если у нас есть защищенные данные
         if self._secure_data and self._xor_mask:
             try:
-                # Расшифровка для сравнения
-                unmasked = bytearray()
-                # Снимаем защиту памяти (если нужно, зависит от реализации protect_data)
-                # Обычно protect_data возвращает bytearray, который защищен в памяти
-
-                # Если KeyStorage использовал CryptProtectMemory, он мог оставить данные в том же буфере
-                # Для простоты считаем, что _secure_data сейчас содержит обфусцированные данные
-
-                # Восстанавливаем оригинал для сравнения
+                # Расшифровываем то, что хранится у нас
                 original_bytes = self._decrypt_memory_data()
+                if original_bytes and new_content == original_bytes.decode('utf-8'):
+                    return
 
-                if new_content != original_bytes.decode('utf-8'):
-                    print("[ClipboardService] External change detected.")
-                    self._clear_timer.stop()
-                    self._cleanup_memory()
+                # Если содержимое НЕ совпадает -> кто-то извне перезаписал буфер!
+                print("[ClipboardService] External change detected! Forcing cleanup.")
+                self._clear_timer.stop()
+                self._cleanup_memory()
             except Exception:
                 pass
 

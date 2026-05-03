@@ -1,6 +1,7 @@
 import sys
 import time
 import traceback
+import platform
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import QSettings, QStringListModel
 
@@ -89,7 +90,9 @@ class MainWindow(QMainWindow):
         self.clipboard_service.warning_5_seconds.connect(self.show_clear_warning)
 
         self.clipboard_service.ephemeral_mode_changed.connect(self._on_ephemeral_mode_changed)
-        print("[MainWindow] Ephemeral mode signal CONNECTED")
+        # --- NEW: Anti-Screenshot Connections ---
+        self.clipboard_service.protection_enabled.connect(self.enable_anti_screenshot)
+        self.clipboard_service.protection_disabled.connect(self.disable_anti_screenshot)
         # Подключение новых сигналов таблицы
         self.table.copy_password_requested.connect(self.copy_password_to_clipboard)
         self.table.copy_username_requested.connect(self.copy_username_to_clipboard)
@@ -1126,4 +1129,68 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'clipboard_preview'):
             self.clipboard_preview.setText("Буфер: пусто")
             self.clipboard_preview.setStyleSheet("color: #888; padding: 0 10px;")
+
+    # --- Anti-Screenshot Protection (Req 6.3.3) ---
+
+    def enable_anti_screenshot(self):
+        """
+        Включает защиту окна от скриншотов (WDA_EXCLUDEFROMCAPTURE).
+        Окно становится черным/невидимым для программ захвата экрана.
+        """
+        print("[MainWindow] Enabling Anti-Screenshot protection...")
+
+        if platform.system() == "Windows":
+            try:
+                import ctypes
+                # Получаем дескриптор окна (HWND)
+                hwnd = int(self.winId())
+
+                # Используем User32.dll -> SetWindowDisplayAffinity
+                # WDA_EXCLUDEFROMCAPTURE = 0x00000011 (Windows 8.1+)
+                # Этот флаг говорит системе: "Не разрешай захват этого окна другим процессам"
+                user32 = ctypes.windll.user32
+                WDA_EXCLUDEFROMCAPTURE = 0x00000011
+
+                result = user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
+
+                if result:
+                    print("[MainWindow] SUCCESS: Window protected from capture (WDA_EXCLUDEFROMCAPTURE).")
+                else:
+                    error = ctypes.get_last_error()
+                    print(f"[MainWindow] FAILED: SetWindowDisplayAffinity returned 0. Error: {error}")
+
+            except Exception as e:
+                print(f"[MainWindow] Error enabling Anti-Screenshot: {e}")
+        else:
+            # Для macOS/Linux можно добавить другие реализации
+            pass
+
+    def disable_anti_screenshot(self):
+        """
+        Выключает защиту окна от скриншотов.
+        Восстанавливает нормальный захват экрана.
+        """
+        print("[MainWindow] Disabling Anti-Screenshot protection...")
+
+        if platform.system() == "Windows":
+            try:
+                import ctypes
+                hwnd = int(self.winId())
+                user32 = ctypes.windll.user32
+                WDA_NONE = 0x00000000  # Снимаем все ограничения
+
+                result = user32.SetWindowDisplayAffinity(hwnd, WDA_NONE)
+
+                if result:
+                    print("[MainWindow] SUCCESS: Window capture restored.")
+                else:
+                    print("[MainWindow] FAILED to restore window capture.")
+
+            except Exception as e:
+                print(f"[MainWindow] Error disabling Anti-Screenshot: {e}")
+
+
+
+
+
 
