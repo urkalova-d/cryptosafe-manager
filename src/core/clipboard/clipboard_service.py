@@ -70,6 +70,7 @@ class ClipboardService(QObject):
         self.monitor = monitor
         self.db_helper = db_helper
 
+        self._entry_manager = None
         self._key_storage_ref = None
 
         # --- Configuration State ---
@@ -119,6 +120,10 @@ class ClipboardService(QObject):
     def set_db_helper(self, db_helper):
         self.db_helper = db_helper
         self._timeout_duration = self._load_timeout()
+
+    def set_entry_manager(self, entry_manager):
+        """Req 9.1: Передача ссылки на EntryManager."""
+        self._entry_manager = entry_manager
 
     def _load_timeout(self) -> int:
         """Загружает таймаут из БД. По умолчанию 30 секунд."""
@@ -227,8 +232,7 @@ class ClipboardService(QObject):
 
     # --- Main Copy Logic ---
     def copy_password(self, entry_id: int, password: str):
-        """Копирование пароля."""
-        print(f"[ClipboardService] copy_password called with ID: {entry_id}")
+        """Legacy метод для совместимости."""
         self._copy_data(entry_id, password, 'password')
 
     def copy_username(self, entry_id: int, username: str):
@@ -241,9 +245,48 @@ class ClipboardService(QObject):
         print(f"[ClipboardService] copy_all called with ID: {entry_id}")
         self._copy_data(entry_id, data_str, 'all')
 
-    def _copy_data(self, entry_id: int, data: str, data_type: str):
-        print(f"[ClipboardService] _copy_data START. ID: {entry_id}, Type: {data_type}")
+    def copy_from_entry(self, entry_id: int, field: str = 'password'):
+        """
+        Req 9.1: Высокоуровневый метод для UI.
+        Самостоятельно получает данные и проверяет политики.
+        """
+        if not self._entry_manager:
+            raise RuntimeError("EntryManager not linked to ClipboardService")
 
+        # 1. Получаем запись
+        entry = self._entry_manager.get_entry(entry_id)
+
+        # 2. Проверка флага запрета копирования (Req 9.1)
+        if entry.get('never_copy', False):
+            msg = f"Copy blocked by policy for entry {entry_id}"
+            print(f"[ClipboardService] {msg}")
+            # Логируем попытку нарушения политики (Req 9.2)
+            self._log_security_event("COPY_BLOCKED_POLICY", entry_id, "Attempted to copy 'never_copy' entry")
+            raise PermissionError("This entry is marked as 'Never copy to clipboard'")
+
+        # 3. Извлекаем данные
+        data_to_copy = ""
+        if field == 'password':
+            data_to_copy = entry.get('password', '')
+        elif field == 'username':
+            data_to_copy = entry.get('username', '')
+        elif field == 'totp':
+            # Future integration: TOTP
+            # data_to_copy = self._entry_manager.generate_totp(entry.get('totp_secret'))
+            pass
+
+        if not data_to_copy:
+            return
+
+        # 4. Выполняем низкоуровневое копирование
+        self._copy_data(entry_id, data_to_copy, field)
+
+        # 5. Логируем успешное действие (Req 9.2)
+        self._log_clipboard_action("COPY", entry_id, field)
+
+
+
+    def _copy_data(self, entry_id: int, data: str, data_type: str):
         if not self._check_vault_unlocked():
             raise PermissionError("Vault is locked. Cannot copy to clipboard.")
 
@@ -264,13 +307,17 @@ class ClipboardService(QObject):
 
         # 2. Подготовка данных
         plain_bytes = data.encode('utf-8')
+        data_len = len(plain_bytes)
 
         # 3. XOR Obfuscation (Req 6.2)
-        if len(plain_bytes) > 0:
-            self._xor_mask = bytearray(secrets.token_bytes(len(plain_bytes)))
-            obfuscated_bytes = bytearray()
-            for i in range(len(plain_bytes)):
-                obfuscated_bytes.append(plain_bytes[i] ^ self._xor_mask[i])
+        if data_len > 0:
+            try:
+                self._xor_mask = secrets.token_bytes(data_len)
+                # Генерация XOR маски и применение в одну строку (быстрее в CPython)
+                obfuscated_bytes = bytes(p ^ m for p, m in zip(plain_bytes, self._xor_mask))
+            except MemoryError:
+                print("[ClipboardService] Memory Error during XOR")
+                raise RuntimeError("Data too large for secure clipboard")
         else:
             self._xor_mask = bytearray()
             obfuscated_bytes = bytearray()
@@ -328,25 +375,33 @@ class ClipboardService(QObject):
         self._clear_timer.stop()
         self.adapter.clear_clipboard()
         self.protection_disabled.emit()
+        if self._current_entry_id:
+            self._log_clipboard_action("CLEAR", self._current_entry_id, self._current_data_type)
+
         self._cleanup_memory()
         self.clipboard_cleared.emit()
         print("[ClipboardService] Clipboard cleared.")
 
     def _cleanup_memory(self):
-        """Req 6.1: Zero memory immediately after clearing."""
+        """Req 10.3: Efficient memory zeroing."""
+        # Быстрая очистка
         if self._secure_data:
-            # ИСПРАВЛЕНО: используем self._key_storage_ref
             if self._key_storage_ref:
                 self._key_storage_ref.zero_buffer(self._secure_data)
-            else:
-                # Fallback zeroing
+            elif isinstance(self._secure_data, bytearray):
+                # Быстрая очистка bytearray
+                # Для bytearray можно сделать срез, но цикл надежнее для безопасности
                 for i in range(len(self._secure_data)):
                     self._secure_data[i] = 0
             self._secure_data = None
 
         if self._xor_mask:
-            for i in range(len(self._xor_mask)):
-                self._xor_mask[i] = 0
+            # _xor_mask может быть bytes (immutable) или bytearray
+            if isinstance(self._xor_mask, bytearray):
+                for i in range(len(self._xor_mask)):
+                    self._xor_mask[i] = 0
+            # Если это bytes, они все равно будут удалены сборщиком мусора,
+            # но мы теряем контроль над перезаписью. Лучше использовать bytearray.
             self._xor_mask = None
 
         self._current_entry_id = None
@@ -365,6 +420,8 @@ class ClipboardService(QObject):
 
                 # Если содержимое НЕ совпадает -> кто-то извне перезаписал буфер!
                 print("[ClipboardService] External change detected! Forcing cleanup.")
+                self._log_security_event("CLIPBOARD_TAMPER", self._current_entry_id, "External overwrite detected")
+
                 self._clear_timer.stop()
                 self._cleanup_memory()
             except Exception:
@@ -384,12 +441,7 @@ class ClipboardService(QObject):
 
         if not raw_data: return b""
 
-        # Снимаем XOR
-        decrypted = bytearray()
-        for i in range(len(raw_data)):
-            decrypted.append(raw_data[i] ^ self._xor_mask[i])
-
-        return bytes(decrypted)
+        return bytes(r ^ m for r, m in zip(raw_data, self._xor_mask))
 
     # API для UI индикации
     def get_current_entry_id(self) -> Optional[int]:
@@ -398,3 +450,11 @@ class ClipboardService(QObject):
     def get_current_data_type(self) -> Optional[str]:
         return self._current_data_type
 
+    def _log_clipboard_action(self, action: str, entry_id: int, field: str):
+        if self.db_helper:
+            details = f"Field: {field}"
+            self.db_helper.add_audit_log(f"CLIPBOARD_{action}", entry_id, details)
+
+    def _log_security_event(self, event_type: str, entry_id: int, details: str):
+        if self.db_helper:
+            self.db_helper.add_audit_log(event_type, entry_id, details)

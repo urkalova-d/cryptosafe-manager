@@ -78,7 +78,7 @@ class MainWindow(QMainWindow):
         from src.core.clipboard import ClipboardService, PlatformAdapter, ClipboardMonitor
 
         self.platform_adapter = PlatformAdapter()
-        self.clipboard_monitor = ClipboardMonitor(self.platform_adapter)
+        self.clipboard_monitor =  ClipboardMonitor()
         self.clipboard_service = ClipboardService(self.platform_adapter, self.clipboard_monitor, self.db_helper)
 
         # Передаем ссылку на хранилище ключей для проверки блокировки

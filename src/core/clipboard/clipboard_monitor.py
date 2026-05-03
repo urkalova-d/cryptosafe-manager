@@ -1,56 +1,80 @@
-# src/core/clipboard/clipboard_monitor.py
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer
-from .platform_adapter import PlatformAdapter
+from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtWidgets import QApplication
+from typing import Optional
 
 
 class ClipboardMonitor(QObject):
     """
     Мониторинг системного буфера обмена.
-    Детектирует внешние изменения (защита от перезаписи).
+    Req 10.2: Использует событийную модель Qt вместо опроса (polling).
+    Это гарантирует 0% CPU usage в простое.
     """
 
-    # Сигналы
-    content_changed = pyqtSignal(str)  # Уведомляет, что содержимое изменилось извне
+    content_changed = pyqtSignal(str)
 
-    def __init__(self, platform_adapter: PlatformAdapter, check_interval_ms=1000):
+    def __init__(self):
+        """
+        Конструктор без аргументов.
+        Использует QApplication.clipboard() напрямую.
+        """
         super().__init__()
-        self.adapter = platform_adapter
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._check_clipboard)
-        self._last_content_hash = None
-        self._check_interval = check_interval_ms
+        self._last_content_hash: Optional[int] = None
         self._is_monitoring = False
+        # Инициализируем доступ к буферу обмена Qt
+        self._clipboard = QApplication.clipboard()
 
     def start_monitoring(self):
-        """Запуск мониторинга."""
+        """Запуск мониторинга. Подключаемся к сигналу Qt."""
         if not self._is_monitoring:
-            self._last_content_hash = self._hash_content(self.adapter.get_clipboard_content())
-            self._timer.start(self._check_interval)
+            # Сохраняем текущее состояние, чтобы не детектировать его как изменение сразу же
+            if self._clipboard:
+                self._last_content_hash = self._hash_content(self._clipboard.text())
+                # Подключаем слот к системному сигналу изменения буфера
+                self._clipboard.dataChanged.connect(self._on_clipboard_change)
+
             self._is_monitoring = True
-            print("[ClipboardMonitor] Started monitoring")
+            print("[ClipboardMonitor] Started (Event-driven mode)")
 
     def stop_monitoring(self):
         """Остановка мониторинга."""
-        self._timer.stop()
-        self._is_monitoring = False
-        print("[ClipboardMonitor] Stopped monitoring")
+        if self._is_monitoring and self._clipboard:
+            try:
+                self._clipboard.dataChanged.disconnect(self._on_clipboard_change)
+            except TypeError:
+                pass  # Уже отключен
+            self._is_monitoring = False
+            print("[ClipboardMonitor] Stopped")
 
-    def _check_clipboard(self):
-        """Периодическая проверка буфера."""
-        current_content = self.adapter.get_clipboard_content()
-        current_hash = self._hash_content(current_content)
+    def _on_clipboard_change(self):
+        """
+        Слот, вызываемый Qt при изменении буфера обмена ОС.
+        Работает мгновенно и не потребляет ресурсы в простое.
+        """
+        if not self._is_monitoring or not self._clipboard:
+            return
 
-        if current_hash != self._last_content_hash:
-            # Содержимое изменилось извне или нами
-            self._last_content_hash = current_hash
-            self.content_changed.emit(current_content if current_content else "")
+        try:
+            # Читаем содержимое. Использование text() быстрее, чем mimeData()
+            current_content = self._clipboard.text()
+            current_hash = self._hash_content(current_content)
+
+            if current_hash != self._last_content_hash:
+                self._last_content_hash = current_hash
+                # Emit signal only if content actually changed
+                self.content_changed.emit(current_content if current_content else "")
+        except Exception as e:
+            print(f"[ClipboardMonitor] Error handling change: {e}")
 
     def update_internal_state(self, content: str):
-        """Обновляет внутреннее состояние после легального копирования сервисом."""
+        """
+        Обновляет внутренний хеш после легального копирования нашим сервисом.
+        Это предотвращает ложное срабатывание защиты.
+        """
         self._last_content_hash = self._hash_content(content)
 
-    def _hash_content(self, content: str) -> str:
-        # Простой хеш для сравнения, чтобы не хранить строки в памяти лишний раз
+    def _hash_content(self, content: str) -> int:
+        """Быстрый хеш для сравнения."""
         if not content:
-            return ""
-        return str(hash(content))
+            return 0
+        # Используем встроенный хеш Python
+        return hash(content)

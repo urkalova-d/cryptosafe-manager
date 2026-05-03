@@ -37,10 +37,11 @@ class EntryManager(QObject):
                 "url": data.get('url', ''),
                 "category": data.get('category', 'Uncategorized'),
                 "notes": data.get('notes', ''),
-
+                "never_copy": data.get('never_copy', False),
                 # интеграции на будущие спринты
                 "totp_secret": data.get('totp_secret', ''),
                 "sharing_metadata": data.get('sharing_metadata', {})
+
             }
 
             # шифрование данных
@@ -125,6 +126,7 @@ class EntryManager(QObject):
                 "url": data.get('url', ''),
                 "category": data.get('category', 'Uncategorized'),
                 "notes": data.get('notes', ''),
+                "never_copy": data.get('never_copy', False),
                 "totp_secret": data.get('totp_secret', ''),
                 "sharing_metadata": data.get('sharing_metadata', {})
             }
@@ -171,9 +173,11 @@ class EntryManager(QObject):
     def _secure_compare(a: str, b: str) -> bool:
         return hmac.compare_digest(a, b)
 
-    def _log_audit_event(self, action: str, entry_id: int):
-        # интеграция с журналом аудита 5 спринт
-        pass
+    def _log_audit_event(self, action: str, entry_id: int, details: str = None):
+        try:
+            self.db.add_audit_log(action, entry_id, details)
+        except Exception as e:
+            print(f"[EntryManager] Failed to log audit event: {e}")
 
     def _calculate_strength(self, password):
         # оценка силы пароля для фильтрации

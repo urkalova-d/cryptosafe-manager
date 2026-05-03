@@ -1,4 +1,3 @@
-# src/core/clipboard/platform_adapter.py
 import sys
 import subprocess
 from typing import Optional
@@ -36,10 +35,6 @@ class PlatformAdapter:
             clipboard = QApplication.clipboard()
 
             # 1. Копируем пустую строку (или пробел)
-            clipboard.setText("")
-
-            # 2. Принудительно синхронизируем (для Windows)
-            # Это заставляет систему зафиксировать изменение прямо сейчас
             clipboard.setText("")
 
             # 3. Только после перезаписи вызываем clear

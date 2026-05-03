@@ -3,6 +3,7 @@ import hashlib
 import os
 from threading import Lock
 import json
+from datetime import datetime
 
 class DatabaseHelper:
     def __init__(self, db_path="vault.db"):
@@ -49,13 +50,15 @@ class DatabaseHelper:
                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                            )
                        """)
-            # таблица для настроек мастер пароля, соли и тд
+
+            # настройки
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS settings (
                     setting_key TEXT PRIMARY KEY,
                     setting_value TEXT NOT NULL
                 )
             """)
+            # Хранилище ключей
             cursor.execute("""
                             CREATE TABLE IF NOT EXISTS key_store (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,7 +73,7 @@ class DatabaseHelper:
             # Политика паролей: минимум 12 символов
             cursor.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES (?, ?)",
                            ("policy_min_length", "12"))
-
+            # История поиска
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS search_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,6 +81,26 @@ class DatabaseHelper:
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # === REQ 9.2: Таблица аудита ===
+            cursor.execute("""
+                            CREATE TABLE IF NOT EXISTS audit_log (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                event_type TEXT NOT NULL,
+                                entry_id INTEGER,
+                                details TEXT,
+                                ip_address TEXT
+                            )""")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_event_type ON audit_log(event_type)")
+
+            # Дефолтные настройки
+            cursor.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES (?, ?)",
+                           ("auto_lock_timeout", "3600"))
+            cursor.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES (?, ?)",
+                           ("policy_min_length", "12"))
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_vault_created_at ON vault_entries(created_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_vault_updated_at ON vault_entries(updated_at)")
@@ -112,6 +135,30 @@ class DatabaseHelper:
                         """)
 
             self.conn.commit()
+
+    def add_audit_log(self, event_type: str, entry_id: int = None, details: str = None):
+        """
+        Req 9.2: Запись события в журнал аудита.
+        """
+        with self._lock:
+            try:
+                self.conn.execute("""
+                    INSERT INTO audit_log (event_type, entry_id, details)
+                    VALUES (?, ?, ?)
+                """, (event_type, entry_id, details))
+                self.conn.commit()
+            except Exception as e:
+                print(f"[DB] Error writing audit log: {e}")
+
+    def get_audit_logs(self, limit=100):
+        with self._lock:
+            cursor = self.conn.execute("""
+                SELECT timestamp, event_type, entry_id, details 
+                FROM audit_log 
+                ORDER BY timestamp DESC 
+                LIMIT ?
+            """, (limit,))
+            return cursor.fetchall()
 
     def save_key_store(self, key_type: str, key_data: bytes, version: int = 1):
         #сохранение соли и параметров
