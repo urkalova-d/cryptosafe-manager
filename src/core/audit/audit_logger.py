@@ -44,12 +44,19 @@ class AuditLogger:
 
     def _subscribe_events(self):
         """Подписка на глобальные события (ARC-2)."""
-        event_bus.subscribe(EventType.ENTRY_ADDED, self.on_vault_event)
-        event_bus.subscribe(EventType.ENTRY_UPDATED, self.on_vault_event)
-        event_bus.subscribe(EventType.ENTRY_DELETED, self.on_vault_event)
-        event_bus.subscribe(EventType.AUTH_SUCCESS, self.on_auth_event)
-        event_bus.subscribe(EventType.AUTH_FAILURE, self.on_auth_event)
-        # Можно добавить другие события
+        # Хранилище
+        event_bus.subscribe(EventType.VAULT_ENTRY_CREATED, self.on_vault_event)
+        event_bus.subscribe(EventType.VAULT_ENTRY_UPDATED, self.on_vault_event)
+        event_bus.subscribe(EventType.VAULT_ENTRY_DELETED, self.on_vault_event)
+
+        # Аутентификация
+        event_bus.subscribe(EventType.AUTH_LOGIN_SUCCESS, self.on_auth_event)
+        event_bus.subscribe(EventType.AUTH_LOGIN_FAILURE, self.on_auth_event)
+        event_bus.subscribe(EventType.AUTH_LOGOUT, self.on_auth_event)
+
+        # Буфер обмена
+        event_bus.subscribe(EventType.CLIPBOARD_COPY, self.on_clipboard_event)
+        event_bus.subscribe(EventType.CLIPBOARD_CLEARED, self.on_clipboard_event)
 
     def _create_genesis_entry(self):
         """Создает первую запись в журнале (Start of Chain)."""
@@ -83,33 +90,42 @@ class AuditLogger:
 
     def on_vault_event(self, data: dict):
         """Обработчик событий хранилища."""
-        # data ожидается: {'entry_id': int, 'action': str, ...}
-        event_map = {
-            'create': ('ENTRY_CREATE', 'INFO'),
-            'update': ('ENTRY_UPDATE', 'INFO'),
-            'delete': ('ENTRY_DELETE', 'WARN')
+        # Определяем тип и важность
+        event_type_map = {
+            'create': ('VAULT_CREATE', 'INFO'),
+            'update': ('VAULT_UPDATE', 'INFO'),
+            'delete': ('VAULT_DELETE', 'WARN'),
+            'read': ('VAULT_READ', 'INFO')
         }
 
-        # Определяем тип события
         action = data.get('action', 'unknown')
-        event_type, severity = event_map.get(action, ('VAULT_OP', 'INFO'))
+        e_type, severity = event_type_map.get(action, ('VAULT_OP', 'INFO'))
 
         self.log_event(
-            event_type=event_type,
+            event_type=e_type,
             severity=severity,
             source='vault_manager',
-            details={'entry_id': data.get('entry_id'), 'action': action}
+            details={
+                'entry_id': data.get('entry_id'),
+                'action': action,
+                'service_name': data.get('service_name', '[REDACTED]')  # Можно передавать имя сервиса
+            }
         )
-
     def on_auth_event(self, data: dict):
         """Обработчик событий аутентификации."""
-        # Если AUTH_SUCCESS, data может быть {'status': 'ok'}
-        # Если AUTH_FAILURE, data может быть {'reason': '...'}
+        action = data.get('action', 'unknown')
+
+        # Определяем важность: неудачный вход - WARN, остальное - INFO
+        severity = 'WARN' if 'failure' in action or action == 'login_failure' else 'INFO'
+
         self.log_event(
-            event_type='AUTH_ATTEMPT',
-            severity='INFO' if data.get('success') else 'WARN',
+            event_type=f"AUTH_{action.upper()}",
+            severity=severity,
             source='auth_service',
-            details=data
+            details={
+                'user_id': data.get('user_id', 'default'),
+                'reason': data.get('reason')
+            }
         )
 
     def _sanitize_details(self, details: Dict) -> Dict:
@@ -156,3 +172,18 @@ class AuditLogger:
         """Проверка целостности цепочки (VER-1)."""
         # Реализуем в следующем пункте (Log Verifier)
         pass
+
+    def on_clipboard_event(self, data: dict):
+        """Обработчик событий буфера обмена."""
+        action = data.get('action', 'copy')
+
+        self.log_event(
+            event_type=f"CLIPBOARD_{action.upper()}",
+            severity='INFO',
+            source='clipboard_service',
+            details={
+                'entry_id': data.get('entry_id'),
+                'data_type': data.get('data_type', 'unknown'),  # password/username
+                'auto_clear': data.get('auto_clear', False)
+            }
+        )

@@ -23,7 +23,7 @@ from src.core.crypto.key_manager import KeyManager
 from src.core.crypto.authentication import AuthenticationService
 from src.core.vault.encryption_service import EncryptionService
 from src.core.clipboard import ClipboardService, PlatformAdapter, ClipboardMonitor
-
+from src.core.audit import AuditLogger, AuditLogSigner
 class LoadDataWorker(QObject):
     # Сигнал передает список расшифрованных записей
     finished = pyqtSignal(list)
@@ -60,7 +60,8 @@ class MainWindow(QMainWindow):
         # Инициализация менеджера записей
         from src.core.vault.entry_manager import EntryManager
         self.entry_manager = EntryManager(self.db_helper, self.key_manager)
-
+        #  Инициализация аудита
+        self.audit_logger = None
         # Подключаем сигналы менеджера записей
         self.entry_manager.EntryCreated.connect(self.on_entry_created)
         self.entry_manager.EntryUpdated.connect(self.on_entry_updated)
@@ -178,6 +179,21 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Ошибка", "Не удалось загрузить ключи шифрования")
             return
 
+        try:
+            print("[MainWindow] Initializing Audit Logger...")
+            # 1. Создаем подписыватель (ему нужен key_manager для получения ключа)
+            signer = AuditLogSigner(self.key_manager)
+
+            # 2. Создаем логгер
+            self.audit_logger = AuditLogger(self.db_helper, signer)
+
+            # 3. Запускаем (создаем Genesis блок и подписываемся на события)
+            self.audit_logger.start()
+            print("[MainWindow] Audit Logger started successfully.")
+        except Exception as e:
+            print(f"[MainWindow] CRITICAL: Failed to start Audit Logger: {e}")
+            # Можно показать предупреждение, но не обязательно крашить приложение
+            QMessageBox.warning(self, "Ошибка Аудита", f"Не удалось запустить систему аудита: {e}")
         self.load_data_from_db()
         self.enable_anti_screenshot()
         # показ главного окна
@@ -430,9 +446,16 @@ class MainWindow(QMainWindow):
         success = self.auth_service.login(password)
 
         if success:
+            from src.core.events import event_bus, EventType
+            event_bus.publish(EventType.AUTH_LOGIN_SUCCESS, {'user_id': 'default'})
             print("Вход успешен!")
             self.login_win.accept()
         else:
+            from src.core.events import event_bus, EventType
+            event_bus.publish(EventType.AUTH_LOGIN_FAILURE, {
+                'reason': 'Invalid password',
+                'attempts': self.auth_service._failed_attempts
+            })
             print("Вход не удался!")
             attempts = self.auth_service._failed_attempts
             msg = "Неверный мастер-пароль!"

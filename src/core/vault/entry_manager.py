@@ -55,11 +55,12 @@ class EntryManager(QObject):
 
             #  Публикация события
             if entry_id:
-                event_bus.publish(EventType.ENTRY_ADDED, {
+                event_bus.publish(EventType.VAULT_ENTRY_CREATED, {
                     'action': 'create',
-                    'entry_id': entry_id,
-                    'service': data.get('service', 'unknown')
+                    'entry_id': entry_id
+
                 })
+                self.EntryCreated.emit(entry_id)
             return entry_id
 
         except Exception as e:
@@ -137,17 +138,17 @@ class EntryManager(QObject):
             encrypted_blob = self.encryption.encrypt_entry(payload_data)
 
             tags = data.get('category', '')
-            self.db.update_entry(entry_id, encrypted_blob, tags=tags)
 
             # интеграция на будущие спринты
             success = self.db.update_entry(entry_id, encrypted_blob, tags)
 
-            # === НОВОЕ: Публикация события ===
+            #  Публикация события
             if success:
-                event_bus.publish(EventType.ENTRY_UPDATED, {
+                event_bus.publish(EventType.VAULT_ENTRY_UPDATED, {
                     'action': 'update',
                     'entry_id': entry_id
                 })
+                self.EntryUpdated.emit(entry_id)
             return success
 
         except Exception as e:
@@ -163,10 +164,10 @@ class EntryManager(QObject):
                 self.db.hard_delete_entry(entry_id)
 
             #Публикация события
-            event_bus.publish(EventType.ENTRY_DELETED, {
+            event_bus.publish(EventType.VAULT_ENTRY_DELETED, {
                 'action': 'delete',
-                'entry_id': entry_id,
-                'soft_delete': soft_delete
+                'entry_id': entry_id
+
             })
 
             # Старый сигнал

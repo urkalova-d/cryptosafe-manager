@@ -2,6 +2,7 @@ import secrets
 import ctypes
 from typing import Optional
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
+from src.core.events import event_bus, EventType
 
 from .platform_adapter import PlatformAdapter
 from .clipboard_monitor import ClipboardMonitor
@@ -221,16 +222,31 @@ class ClipboardService(QObject):
     def copy_password(self, entry_id: int, password: str):
         # для совместимости
         self._copy_data(entry_id, password, 'password')
+        event_bus.publish(EventType.CLIPBOARD_COPY, {
+            'action': 'copy',
+            'entry_id': entry_id,
+            'data_type': 'password'
+        })
 
     def copy_username(self, entry_id: int, username: str):
         #Копирование имени пользователя
         print(f"[ClipboardService] copy_username called with ID: {entry_id}")
         self._copy_data(entry_id, username, 'username')
+        event_bus.publish(EventType.CLIPBOARD_COPY, {
+            'action': 'copy',
+            'entry_id': entry_id,
+            'data_type': 'username'
+        })
 
     def copy_all(self, entry_id: int, data_str: str):
         #Копирование всех данных
         print(f"[ClipboardService] copy_all called with ID: {entry_id}")
         self._copy_data(entry_id, data_str, 'all')
+        event_bus.publish(EventType.CLIPBOARD_COPY, {
+            'action': 'copy',
+            'entry_id': entry_id,
+            'data_type': 'all'
+        })
 
     def copy_from_entry(self, entry_id: int, field: str = 'password'):
         if not self._entry_manager:
@@ -358,6 +374,7 @@ class ClipboardService(QObject):
         self._perform_clear()
         self._clear_ephemeral()
 
+
     def _tick(self):
         self._remaining_seconds -= 1
         self.timer_updated.emit(self._remaining_seconds)
@@ -380,8 +397,11 @@ class ClipboardService(QObject):
         self.protection_disabled.emit()
 
         if self._current_entry_id:
-            self._log_clipboard_action("CLEAR", self._current_entry_id, self._current_data_type)
-
+            event_bus.publish(EventType.CLIPBOARD_CLEARED, {
+                'action': 'clear',
+                'entry_id': self._current_entry_id,
+                'trigger': 'manual'
+            })
         self._cleanup_memory()
         self.clipboard_cleared.emit()
 
@@ -460,6 +480,7 @@ class ClipboardService(QObject):
     def get_current_data_type(self) -> Optional[str]:
         return self._current_data_type
 
+    """
     def _log_clipboard_action(self, action: str, entry_id: int, field: str):
         if self.db_helper:
             details = f"Field: {field}"
@@ -468,3 +489,4 @@ class ClipboardService(QObject):
     def _log_security_event(self, event_type: str, entry_id: int, details: str):
         if self.db_helper:
             self.db_helper.add_audit_log(event_type, entry_id, details)
+    """

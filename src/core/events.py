@@ -1,26 +1,30 @@
 from enum import Enum, auto
 
 class EventType(Enum):
-    # Системные
-    SETTINGS_CHANGED = auto()
-    DATABASE_UPDATED = auto()
-
     # Аутентификация
-    AUTH_SUCCESS = auto()
-    AUTH_FAILURE = auto()
-    USER_LOGGED_IN = auto()
-    USER_LOGGED_OUT = auto()
+    AUTH_LOGIN_SUCCESS = auto()
+    AUTH_LOGIN_FAILURE = auto()
+    AUTH_LOGOUT = auto()
+    AUTH_PASSWORD_CHANGE = auto()
+    AUTH_LOCK = auto()
+    AUTH_UNLOCK = auto()
 
     # Хранилище
-    ENTRY_ADDED = auto()
-    ENTRY_UPDATED = auto()
-    ENTRY_DELETED = auto()
-    ENTRY_READ = auto()
-    ENTRY_COPIED = auto()
+    VAULT_ENTRY_CREATED = auto()
+    VAULT_ENTRY_UPDATED = auto()
+    VAULT_ENTRY_DELETED = auto()
+    VAULT_ENTRY_READ = auto()  # При просмотре/расшифровке
 
-    # Буфер обмена
-    CLIPBOARD_COPY = auto()
-    CLIPBOARD_CLEAR = auto()
+    #Буфер обмена
+    CLIPBOARD_COPY = auto()  # Копирование данных
+    CLIPBOARD_CLEARED = auto()  # Очистка буфера
+    CLIPBOARD_TIMEOUT = auto()  # Авто-очистка по таймеру
+
+    # Система
+    SYSTEM_STARTUP = auto()
+    SYSTEM_SHUTDOWN = auto()
+    SYSTEM_SETTINGS_CHANGED = auto()
+    SYSTEM_PANIC_MODE = auto()
 
 
 class EventBus:
