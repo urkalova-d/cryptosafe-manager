@@ -153,20 +153,13 @@ class KeyStorage:
         return False
 
     def protect_data(self, data: bytes) -> Optional[bytearray]:
-        """Защищает произвольные данные (например, для буфера обмена)."""
+        #Защищает произвольные данные
         if not data:
             return None
 
         buffer = bytearray(data)
 
         if self._memory_protection_available:
-            # --- Req 11.2 Implementation Details ---
-
-            # 1. Предотвращение свопинга (Windows specific logic)
-            # CryptProtectMemory шифрует страницу памяти, делая её нечитаемой для других процессов,
-            # но она все еще может попасть в swap файл в зашифрованном виде.
-            # Для полной безопасности можно использовать VirtualLock (не свопировать),
-            # но DPAPI CryptProtectMemory достаточно для "Process Isolation" от других юзеров/процессов.
 
             if self._protection_method == "CryptProtectMemory":
                 # DPAPI требует выравнивания данных (padding)
@@ -194,7 +187,7 @@ class KeyStorage:
         return buffer
 
     def unprotect_data(self, buffer: bytearray) -> Optional[bytes]:
-        """Снимает защиту и возвращает копию данных."""
+        #Снимает защиту и возвращает копию данных
         if not buffer:
             return None
 
@@ -204,7 +197,7 @@ class KeyStorage:
         return bytes(buffer)
 
     def zero_buffer(self, buffer: bytearray):
-        """Безопасная очистка произвольного буфера."""
+        #Безопасная очистка произвольного буфера
         if buffer:
             try:
                 # Если память была защищена, снимаем защиту перед затиранием

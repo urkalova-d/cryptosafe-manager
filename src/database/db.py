@@ -137,9 +137,8 @@ class DatabaseHelper:
             self.conn.commit()
 
     def add_audit_log(self, event_type: str, entry_id: int = None, details: str = None):
-        """
-        Req 9.2: Запись события в журнал аудита.
-        """
+        # Запись события в журнал аудита.
+
         with self._lock:
             try:
                 self.conn.execute("""

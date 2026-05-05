@@ -321,7 +321,7 @@ class AddRecordWindow(QDialog):
         original_paste = line_edit.paste
 
         def custom_paste():
-            """Переопределенная вставка для эфемерного режима"""
+            #Переопределенная вставка для эфемерного режима
             if self.clipboard_service and self.clipboard_service.is_ephemeral_mode():
                 # В эфемерном режиме - берем пароль из эфемерного буфера
                 password = self.clipboard_service.get_ephemeral_password()
@@ -337,7 +337,7 @@ class AddRecordWindow(QDialog):
         line_edit.paste = custom_paste
 
     def _ephemeral_paste_to_field(self, line_edit: QLineEdit):
-        """Вставка из эфемерного буфера в поле"""
+        #Вставка из эфемерного буфера в поле
         if not self.clipboard_service:
             return
         password = self.clipboard_service.get_ephemeral_password()
@@ -348,7 +348,7 @@ class AddRecordWindow(QDialog):
                 self.parent().statusBar().showMessage("Пароль вставлен из эфемерного буфера (безопасно)", 3000)
 
     def _paste_from_ephemeral(self):
-        """Вставка из эфемерного буфера по кнопке"""
+        #Вставка из эфемерного буфера по кнопке
         if not self.clipboard_service:
             return
         password = self.clipboard_service.get_ephemeral_password()
@@ -361,7 +361,7 @@ class AddRecordWindow(QDialog):
             QMessageBox.information(self, "Нет данных", "В эфемерном буфере нет пароля")
 
     def _update_ephemeral_button(self):
-        """Обновление состояния кнопки эфемерной вставки"""
+        #Обновление состояния кнопки эфемерной вставки
         if not self.clipboard_service:
             return
         is_ephemeral = self.clipboard_service.is_ephemeral_mode()
@@ -371,7 +371,7 @@ class AddRecordWindow(QDialog):
         self.ephemeral_paste_btn.setVisible(is_ephemeral and has_data)
 
     def _create_keypress_handler(self, line_edit):
-        """Создает обработчик клавиш для поля ввода"""
+        #Создает обработчик клавиш для поля ввода
         original_keypress = line_edit.keyPressEvent
 
         def custom_keypress(event):

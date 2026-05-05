@@ -5,11 +5,6 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 
 class SettingsDialog(QDialog):
-    """
-    Req 7: Configuration & Settings Dialog.
-    Allows switching profiles and customizing behavior.
-    """
-
     settings_updated = pyqtSignal()
 
     def __init__(self, clipboard_service, db_helper, parent=None):
@@ -28,7 +23,6 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
 
-        # --- 1. Preset Profiles (Req 7.3) ---
         profile_group = QGroupBox("Профиль безопасности")
         profile_layout = QGridLayout(profile_group)
 
@@ -36,11 +30,11 @@ class SettingsDialog(QDialog):
         self.profile_combo = QComboBox()
         self.profile_combo.addItem("Standard (30 сек, уведомления вкл)", "standard")
         self.profile_combo.addItem("Secure (15 сек, мониторинг)", "secure")
-        self.profile_combo.addItem("Public Computer (5 сек, паранойя)", "public")
+        self.profile_combo.addItem("Public Computer (5 сек)", "public")
         self.profile_combo.currentIndexChanged.connect(self._on_profile_changed)
         profile_layout.addWidget(self.profile_combo, 0, 1, 1, 2)
 
-        # Description label
+        # описание
         self.profile_desc = QLabel("")
         self.profile_desc.setStyleSheet("color: #666; font-style: italic; font-size: 11px;")
         self.profile_desc.setWordWrap(True)
@@ -48,18 +42,18 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(profile_group)
 
-        # --- 2. Custom Settings (Req 7.1) ---
+        # настройки
         custom_group = QGroupBox("Ручные настройки")
         custom_layout = QGridLayout(custom_group)
 
-        # Auto-clear timeout
+        # автоочистка
         custom_layout.addWidget(QLabel("Авто-очистка через:"), 0, 0)
         self.timeout_spin = QSpinBox()
         self.timeout_spin.setRange(5, 300)
         self.timeout_spin.setSuffix(" сек")
         custom_layout.addWidget(self.timeout_spin, 0, 1)
 
-        # Notification preferences
+        #уведомления настройка
         self.notif_enabled = QCheckBox("Показывать уведомления (Toast)")
         custom_layout.addWidget(self.notif_enabled, 1, 0, 1, 3)
 
@@ -69,7 +63,7 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(custom_group)
 
-        # --- 3. Advanced Security (Req 7.1) ---
+        # повышенная защита
         adv_group = QGroupBox("Дополнительная защита")
         adv_layout = QVBoxLayout(adv_group)
 
@@ -80,13 +74,10 @@ class SettingsDialog(QDialog):
         )
         adv_layout.addWidget(self.anti_screenshot_check)
 
-        # Placeholder for Whitelist (Req 7.1 - advanced)
-        # whitelist_label = QLabel("Список разрешенных приложений: (В разработке)")
-        # adv_layout.addWidget(whitelist_label)
 
         layout.addWidget(adv_group)
 
-        # --- Buttons ---
+        # кнопочки
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
@@ -102,7 +93,7 @@ class SettingsDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def _on_profile_changed(self, index):
-        """Updates description and hints when user selects a preset."""
+        #описание и подсказки
         profile_key = self.profile_combo.currentData()
         desc = ""
 
@@ -116,7 +107,6 @@ class SettingsDialog(QDialog):
 
         self.profile_desc.setText(desc)
 
-        # Update spinbox to reflect preset default
         profiles = {
             "standard": 30,
             "secure": 15,
@@ -126,40 +116,39 @@ class SettingsDialog(QDialog):
             self.timeout_spin.setValue(profiles[profile_key])
 
     def _load_settings(self):
-        """Load current settings from Service/DB."""
-        # Load Profile
+        #текущие настройки
+        # загрузка
         current_profile = self.clipboard_service.get_current_profile()
         index = self.profile_combo.findData(current_profile)
         if index >= 0:
             self.profile_combo.setCurrentIndex(index)
 
-        # Load Timeout
+        # таймаут
         self.timeout_spin.setValue(self.clipboard_service.get_timeout())
 
-        # Load Notifications
+        #уведомления
         self.notif_enabled.setChecked(self.clipboard_service.are_notifications_enabled())
 
-        # Load Anti-screenshot
+        # антискриншонт
         self.anti_screenshot_check.setChecked(self.clipboard_service._anti_screenshot_enabled)
 
     def _save_settings(self):
-        """Apply and save settings."""
+        #сохранение настроек
         try:
-            # 1. Apply Profile
+            # применение профиля
             profile_key = self.profile_combo.currentData()
             self.clipboard_service.set_security_profile(profile_key)
 
-            # 2. Apply Custom Timeout (saves to DB inside service)
+            # таймаут
             custom_timeout = self.timeout_spin.value()
             self.clipboard_service.set_timeout(custom_timeout)
 
-            # 3. Apply Notifications
+            # уведомления
             self.clipboard_service.set_notifications_enabled(self.notif_enabled.isChecked())
 
-            # 4. Apply Anti-Screenshot
-            # Update the flag in service
+            #антискриншот
             self.clipboard_service._anti_screenshot_enabled = self.anti_screenshot_check.isChecked()
-            # Save to DB manually for this flag
+            # сохранение флага в бд
             self.db_helper.save_setting("anti_screenshot_enabled",
                                         "1" if self.anti_screenshot_check.isChecked() else "0")
 

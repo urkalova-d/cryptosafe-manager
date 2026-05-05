@@ -7,8 +7,6 @@ from .platform_adapter import PlatformAdapter
 from .clipboard_monitor import ClipboardMonitor
 from src.core.crypto.key_storage import KeyStorage
 
-
-# Простая реализация уровня угрозы для совместимости
 class ThreatLevel:
     NONE = 0
     LOW = 1
@@ -39,28 +37,21 @@ SECURITY_PROFILES = {
 
 
 class ClipboardService(QObject):
-    """
-    Централизованный интерфейс для работы с буфером обмена.
-    Объединяет сервис и защиту (Defender) в одном классе для надежности.
-    """
-
-    # --- Observer Signals ---
+    # интерфейс для работы с буфером обмена
     clipboard_copied = pyqtSignal(int)
     clipboard_cleared = pyqtSignal()
     timer_updated = pyqtSignal(int)
 
     copy_username_requested = pyqtSignal(int)
     copy_all_requested = pyqtSignal(int)
-    warning_5_seconds = pyqtSignal()  # Сигнал за 5 секунд до очистки
+    warning_5_seconds = pyqtSignal()  #  5 секунд до очистки
 
-    # --- Defense Signals ---
-    threat_detected = pyqtSignal(int, str)  # (ThreatLevel, message)
+    threat_detected = pyqtSignal(int, str)
     block_state_changed = pyqtSignal(bool)
     ephemeral_mode_changed = pyqtSignal(bool)
 
-    # --- NEW: Anti-Screenshot Signals ---
-    protection_enabled = pyqtSignal()  # Сигнал: включить защиту окна
-    protection_disabled = pyqtSignal()  # Сигнал: выключить защиту окна
+    protection_enabled = pyqtSignal()  # включить защиту окна
+    protection_disabled = pyqtSignal()  #  выключить защиту окна
     error_occurred = pyqtSignal(str)
     _instance = None
 
@@ -73,26 +64,21 @@ class ClipboardService(QObject):
         self._entry_manager = None
         self._key_storage_ref = None
 
-        # --- Configuration State ---
         self._security_profile = "standard"
         self._anti_screenshot_enabled = False
         self._notifications_enabled = True
 
-        # --- Ephemeral Mode State (MON-4) ---
         self._ephemeral_mode = False
         self._ephemeral_password: Optional[str] = None
         self._ephemeral_entry_id: Optional[int] = None
         self._ephemeral_timer = QTimer(self)
         self._ephemeral_timer.timeout.connect(self._clear_ephemeral)
 
-        # Secure Memory Storage
         self._secure_data: Optional[bytearray] = None
         self._xor_mask: Optional[bytearray] = None
         self._current_entry_id: Optional[int] = None
         self._current_data_type: Optional[str] = None
 
-
-        # Timer Logic
         self._clear_timer = QTimer(self)
         self._clear_timer.timeout.connect(self._tick)
         self._remaining_seconds = 0
@@ -102,10 +88,8 @@ class ClipboardService(QObject):
         # Флаг для отслеживания предупреждения
         self._warning_shown = False
 
-        # Monitor Integration
         self.monitor.content_changed.connect(self._on_external_clipboard_change)
 
-    # --- Singleton ---
     @classmethod
     def get_instance(cls, adapter=None, monitor=None, db_helper=None):
         if cls._instance is None:
@@ -114,7 +98,7 @@ class ClipboardService(QObject):
         return cls._instance
 
     def set_key_storage(self, key_storage):
-        """Передача ссылки на KeyStorage для проверки блокировки."""
+        #Передача ссылки на KeyStorage для проверки блокировки
         self._key_storage_ref = key_storage
 
     def set_db_helper(self, db_helper):
@@ -122,11 +106,11 @@ class ClipboardService(QObject):
         self._timeout_duration = self._load_timeout()
 
     def set_entry_manager(self, entry_manager):
-        """Req 9.1: Передача ссылки на EntryManager."""
+        # Передача ссылки на EntryManager
         self._entry_manager = entry_manager
 
     def _load_timeout(self) -> int:
-        """Загружает таймаут из БД. По умолчанию 30 секунд."""
+        #Загружает таймаут из бд
         if not self.db_helper: return 30
         val = self.db_helper.get_setting("clipboard_timeout")
         try:
@@ -134,9 +118,8 @@ class ClipboardService(QObject):
         except ValueError:
             return 30
 
-    # --- Settings ---
     def load_settings(self):
-        """Load settings from DB on startup."""
+        #загрузка настроек из бд
         if not self.db_helper: return
 
         profile = self.db_helper.get_setting("security_profile")
@@ -146,11 +129,10 @@ class ClipboardService(QObject):
             self.set_security_profile("standard", save=False)
 
         notif = self.db_helper.get_setting("notifications_enabled")
-        # По умолчанию True, если настройки нет или она "1"
         self._notifications_enabled = (notif is None or notif == "1")
 
     def set_security_profile(self, profile_key: str, save: bool = True):
-        """Apply a security profile."""
+        #применение пофиля защиты
         if profile_key not in SECURITY_PROFILES:
             print(f"[ClipboardService] Invalid profile: {profile_key}")
             return
@@ -182,18 +164,17 @@ class ClipboardService(QObject):
         return self._timeout_duration
 
     def are_notifications_enabled(self) -> bool:
-        """Req 7.1: Проверка, включены ли уведомления."""
+        # проверка включены ли уведомления
         return self._notifications_enabled
 
     def set_notifications_enabled(self, enabled: bool):
-        """Req 7.1: Включение/выключение уведомлений."""
+        #Включение/выключение уведомлений
         self._notifications_enabled = enabled
         if self.db_helper:
             self.db_helper.save_setting("notifications_enabled", "1" if enabled else "0")
-    # --- MON-4: Ephemeral Mode ---
 
     def set_ephemeral_mode(self, enabled: bool):
-        """Включение/выключение эфемерного режима."""
+        #Включение/выключение эфемерного режима
         self._ephemeral_mode = enabled
         if enabled:
             # При включении очищаем системный буфер для безопасности
@@ -209,7 +190,7 @@ class ClipboardService(QObject):
         return self._ephemeral_mode
 
     def get_ephemeral_password(self) -> Optional[str]:
-        """Метод для получения пароля из эфемерного буфера (используется в UI)."""
+        # получениепароля из эфемерного буфера
         if self._ephemeral_mode:
             return self._ephemeral_password
         return None
@@ -218,63 +199,55 @@ class ClipboardService(QObject):
         return self._ephemeral_mode and self._ephemeral_password is not None
 
     def _clear_ephemeral(self):
-        """Очистка эфемерного буфера."""
+        #Очистка эфемерного буфера
         self._ephemeral_password = None
         self._ephemeral_entry_id = None
         self._ephemeral_timer.stop()
 
     def _check_vault_unlocked(self) -> bool:
-        """Req 6.3: Проверка, что хранилище разблокировано перед операцией."""
+        #Проверка что хранилище разблокировано перед операцией
         if self._key_storage_ref and self._key_storage_ref.is_locked():
             print("[ClipboardService] BLOCKED: Vault is locked.")
             return False
         return True
 
     def on_vault_lock(self):
-        """
-        Вызывается внешним компонентом (например, MainWindow) при блокировке хранилища.
-        Мгновенно и безопасно очищает все буферы.
-        """
+        #Мгновенно очищает все буферы
         print("[ClipboardService] Vault lock detected. Clearing clipboard immediately.")
         self.clear_now()
         # Дополнительно логируем событие безопасности
         self._log_security_event("VAULT_LOCK_CLEAR", None, "Clipboard cleared due to vault lock")
 
-    # --- Main Copy Logic ---
     def copy_password(self, entry_id: int, password: str):
-        """Legacy метод для совместимости."""
+        # для совместимости
         self._copy_data(entry_id, password, 'password')
 
     def copy_username(self, entry_id: int, username: str):
-        """Копирование имени пользователя (Sprint 5)."""
+        #Копирование имени пользователя
         print(f"[ClipboardService] copy_username called with ID: {entry_id}")
         self._copy_data(entry_id, username, 'username')
 
     def copy_all(self, entry_id: int, data_str: str):
-        """Копирование всех данных (Sprint 5). data_str = 'username:password'."""
+        #Копирование всех данных
         print(f"[ClipboardService] copy_all called with ID: {entry_id}")
         self._copy_data(entry_id, data_str, 'all')
 
     def copy_from_entry(self, entry_id: int, field: str = 'password'):
-        """
-        Req 9.1: Высокоуровневый метод для UI.
-        Самостоятельно получает данные и проверяет политики.
-        """
         if not self._entry_manager:
             raise RuntimeError("EntryManager not linked to ClipboardService")
 
-        # 1. Получаем запись
+        # Получение записи
         entry = self._entry_manager.get_entry(entry_id)
 
-        # 2. Проверка флага запрета копирования (Req 9.1)
+        #  Проверка флага запрета копирования
         if entry.get('never_copy', False):
             msg = f"Copy blocked by policy for entry {entry_id}"
             print(f"[ClipboardService] {msg}")
-            # Логируем попытку нарушения политики (Req 9.2)
+            # Логируем попытку нарушения политики
             self._log_security_event("COPY_BLOCKED_POLICY", entry_id, "Attempted to copy 'never_copy' entry")
             raise PermissionError("This entry is marked as 'Never copy to clipboard'")
 
-        # 3. Извлекаем данные
+        #  Извлекаем данные
         data_to_copy = ""
         if field == 'password':
             data_to_copy = entry.get('password', '')
@@ -288,16 +261,15 @@ class ClipboardService(QObject):
         if not data_to_copy:
             return
 
-        # 4. Выполняем низкоуровневое копирование
+        #  Выполняем низкоуровневое копирование
         self._copy_data(entry_id, data_to_copy, field)
 
-        # 5. Логируем успешное действие (Req 9.2)
+        # Логируем успешное действие
         self._log_clipboard_action("COPY", entry_id, field)
 
 
 
     def _copy_data(self, entry_id: int, data: str, data_type: str):
-        # --- Req 11.4: Input Validation ---
         if not isinstance(entry_id, int) or entry_id < 0:
             raise ValueError("Invalid Entry ID")
 
@@ -305,8 +277,8 @@ class ClipboardService(QObject):
             # Защита от передачи None или объектов
             data = str(data) if data is not None else ""
 
-        # Защита от переполнения (ограничим разумным пределом 1MB для паролей)
-        MAX_CLIPBOARD_SIZE = 1024 * 1024  # 1 MB
+        # Защита от переполнения
+        MAX_CLIPBOARD_SIZE = 1024 * 1024  # 1мб
         if len(data) > MAX_CLIPBOARD_SIZE:
             raise ValueError("Data exceeds maximum safe clipboard size")
         if not self._check_vault_unlocked():
@@ -322,25 +294,25 @@ class ClipboardService(QObject):
                 self.clipboard_copied.emit(entry_id)
             return
 
-        # --- Обычный режим с защитой памяти ---
+        #Обычный режим с защитой памяти
         try:
-            # 1. Очистка старых данных
+            # Очистка старых данных
             self._cleanup_memory()
 
-            # 2. Подготовка данных
+            # Подготовка данных
             plain_bytes = data.encode('utf-8')
             data_len = len(plain_bytes)
 
-            # 3. XOR Obfuscation (Req 6.2)
+            #  XOR
             if data_len > 0:
                 self._xor_mask = secrets.token_bytes(data_len)
-                # Генерация XOR маски и применение в одну строку (быстрее в CPython)
+                # Генерация XOR маски и применение в одну строку
                 obfuscated_bytes = bytes(p ^ m for p, m in zip(plain_bytes, self._xor_mask))
             else:
                 self._xor_mask = bytearray()
                 obfuscated_bytes = bytearray()
 
-            # 4. Secure Memory Storage (Req 6.1)
+            # безопасное хранение в памяти
             if self._key_storage_ref:
                 self._secure_data = self._key_storage_ref.protect_data(bytes(obfuscated_bytes))
             else:
@@ -350,7 +322,7 @@ class ClipboardService(QObject):
             self._current_data_type = data_type
             self._warning_shown = False
 
-            # 5. Копирование в системный буфер
+            # Копирование в системный буфер
             success = self.adapter.copy_to_clipboard(data)
 
             if success:
@@ -359,43 +331,38 @@ class ClipboardService(QObject):
                     self._remaining_seconds = self._timeout_duration
                     self._clear_timer.start(1000)
 
-                # --- Anti-Screenshot Logic (Req 7.1) ---
+                # антискриншот
                 if self._anti_screenshot_enabled:
                     self.protection_enabled.emit()
 
                 self.clipboard_copied.emit(entry_id)
                 print("[ClipboardService] Copy SUCCESS.")
             else:
-                # --- Req 12.4: Log failure ---
                 self._log_security_event("COPY_FAILED", entry_id, "Platform adapter returned False")
                 self._cleanup_memory()
                 raise RuntimeError("Failed to copy to clipboard")
 
         except MemoryError:
-            # --- Req 12.4: Log critical error ---
             self._log_security_event("MEMORY_ERROR", entry_id, "Out of memory during XOR obfuscation")
             self._cleanup_memory()
             raise RuntimeError("System out of memory. Data too large.")
 
         except Exception as e:
-            # --- Req 12.4: Log unexpected errors ---
             self._log_security_event("UNEXPECTED_ERROR", entry_id, f"Exception: {str(e)}")
             self._cleanup_memory()
             # Перебрасываем исключение, чтобы UI мог его обработать
             raise e
 
     def clear_now(self):
-        """Принудительная очистка обоих буферов."""
+        #Принудительная очистка обоих буферов
         self._perform_clear()
         self._clear_ephemeral()
-
-    # --- Internal Logic ---
 
     def _tick(self):
         self._remaining_seconds -= 1
         self.timer_updated.emit(self._remaining_seconds)
 
-        # Sprint 5: Предупреждение за 5 секунд
+        #  Предупреждение за 5 секунд
         if self._remaining_seconds == 5 and not self._warning_shown:
             self.warning_5_seconds.emit()
             self._warning_shown = True
@@ -404,7 +371,7 @@ class ClipboardService(QObject):
             self._perform_clear()
 
     def _perform_clear(self):
-        """Req 12.2: Recovery mechanism."""
+        #востановлние
         self._clear_timer.stop()
 
         # Попытка очистки
@@ -418,7 +385,6 @@ class ClipboardService(QObject):
         self._cleanup_memory()
         self.clipboard_cleared.emit()
 
-        # --- Req 12.2: Verification & Warning ---
         if not clear_success:
             msg = "CRITICAL: Failed to clear system clipboard! Please clear it manually (Ctrl+V in a text editor)."
             print(f"[ClipboardService] {msg}")
@@ -431,14 +397,13 @@ class ClipboardService(QObject):
             print("[ClipboardService] Clipboard cleared.")
 
     def _cleanup_memory(self):
-        """Req 10.3: Efficient memory zeroing."""
+        #зануленик памяти
         # Быстрая очистка
         if self._secure_data:
             if self._key_storage_ref:
                 self._key_storage_ref.zero_buffer(self._secure_data)
             elif isinstance(self._secure_data, bytearray):
-                # Быстрая очистка bytearray
-                # Для bytearray можно сделать срез, но цикл надежнее для безопасности
+                # Быстрая очистка bytearra
                 for i in range(len(self._secure_data)):
                     self._secure_data[i] = 0
             self._secure_data = None
@@ -448,8 +413,6 @@ class ClipboardService(QObject):
             if isinstance(self._xor_mask, bytearray):
                 for i in range(len(self._xor_mask)):
                     self._xor_mask[i] = 0
-            # Если это bytes, они все равно будут удалены сборщиком мусора,
-            # но мы теряем контроль над перезаписью. Лучше использовать bytearray.
             self._xor_mask = None
 
         self._current_entry_id = None
@@ -458,15 +421,14 @@ class ClipboardService(QObject):
         self.timer_updated.emit(0)
 
     def _on_external_clipboard_change(self, new_content: str):
-        # Если у нас есть защищенные данные
         if self._secure_data and self._xor_mask:
             try:
-                # Расшифровываем то, что хранится у нас
+                # Расшифровываем то что хранится у нас
                 original_bytes = self._decrypt_memory_data()
                 if original_bytes and new_content == original_bytes.decode('utf-8'):
                     return
 
-                # Если содержимое НЕ совпадает -> кто-то извне перезаписал буфер!
+                # Если содержимое НЕ совпадает -> кто-то извне перезаписал буфер
                 print("[ClipboardService] External change detected! Forcing cleanup.")
                 self._log_security_event("CLIPBOARD_TAMPER", self._current_entry_id, "External overwrite detected")
 
@@ -476,11 +438,11 @@ class ClipboardService(QObject):
                 pass
 
     def _decrypt_memory_data(self) -> bytes:
-        """Вспомогательный метод для безопасного чтения данных."""
+        #Вспомогательный метод для безопасного чтения данных
         if not self._secure_data or not self._xor_mask:
             return b""
 
-        # Получаем сырые данные (снимаем защиту ОС)
+        # Получаем сырые данные
         raw_data = None
         if self._key_storage_ref:
             raw_data = self._key_storage_ref.unprotect_data(self._secure_data)

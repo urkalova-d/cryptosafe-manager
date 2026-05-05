@@ -66,15 +66,14 @@ class MainWindow(QMainWindow):
         self.entry_manager.EntryUpdated.connect(self.on_entry_updated)
         self.entry_manager.EntryDeleted.connect(self.on_entry_deleted)
 
-        # ЭТИ СТРОКИ ОСТАВЛЯЕМ! Они нужны.
         self.auth_service = AuthenticationService(self.key_manager, self.db_helper, timeout_seconds=3600)
         self.encryption_service = EncryptionService(self.key_manager)
 
         self.all_records_cache = []
-        # 2. Создание UI (ЗДЕСЬ СОЗДАЕТСЯ self.table)
+        #  Создание UI
         self.init_ui()
 
-        # 3. Инициализация буфера обмена
+        #  Инициализация буфера обмена
         from src.core.clipboard import ClipboardService, PlatformAdapter, ClipboardMonitor
 
         self.platform_adapter = PlatformAdapter()
@@ -86,14 +85,15 @@ class MainWindow(QMainWindow):
 
         self.clipboard_service.load_settings()
 
-        # 4. Подключение сигналов (теперь self.table существует)
+        # 4. Подключение сигналов
         self.clipboard_service.timer_updated.connect(self.update_timer_label_service)
         self.clipboard_service.clipboard_cleared.connect(self.on_clipboard_cleared)
         self.clipboard_service.clipboard_copied.connect(self.on_clipboard_copied)
         self.clipboard_service.warning_5_seconds.connect(self.show_clear_warning)
 
         self.clipboard_service.ephemeral_mode_changed.connect(self._on_ephemeral_mode_changed)
-        # --- NEW: Anti-Screenshot Connections ---
+        # антискриншот
+        self._anti_screenshot_enabled = False
         self.clipboard_service.protection_enabled.connect(self.enable_anti_screenshot)
         self.clipboard_service.protection_disabled.connect(self.disable_anti_screenshot)
         # Подключение новых сигналов таблицы
@@ -120,7 +120,6 @@ class MainWindow(QMainWindow):
 
         self.hide()
         QTimer.singleShot(100, self.check_first_run)
-        # --- Load Settings on Startup ---
 
 
     def init_ui(self):
@@ -137,30 +136,30 @@ class MainWindow(QMainWindow):
         self.create_status_bar()
 
     def eventFilter(self, obj, event):
-        # Существующая проверка активности
+        # проверка активности
         if event.type() in [QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress]:
             if hasattr(self, 'auth_service') and self.auth_service.is_authenticated():
                 self.auth_service.update_activity()
 
-        # Глобальный перехват Ctrl+V для эфемерного буфера
+        # Ctrl+V для эфемерного буфера
         if event.type() == QEvent.Type.KeyPress:
             if event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_V:
-                # Проверяем, включен ли эфемерный режим
+                # проверка состояния режима
                 if hasattr(self, 'clipboard_service') and self.clipboard_service.is_ephemeral_mode():
-                    # Получаем пароль из эфемерного буфера
+                    # получениепароля из эфемерного буфера
                     password = self.clipboard_service.get_ephemeral_password()
                     if password:
-                        # Находим активное поле ввода
                         focus_widget = QApplication.focusWidget()
                         if isinstance(focus_widget, QLineEdit):
                             focus_widget.setText(password)
                             self.statusBar().showMessage("🔒 Пароль вставлен из эфемерного буфера", 3000)
-                            return True  # Событие обработано, не передаем дальше
+                            return True
 
         return super().eventFilter(obj, event)
 
     def closeEvent(self, event):
         print("Закрытие приложения -> Очистка памяти")
+        self.disable_anti_screenshot()
         self.clipboard_service.clear_now()
         self.auth_service.logout()
         super().closeEvent(event)
@@ -180,7 +179,7 @@ class MainWindow(QMainWindow):
             return
 
         self.load_data_from_db()
-
+        self.enable_anti_screenshot()
         # показ главного окна
         self.show()
 
@@ -189,6 +188,7 @@ class MainWindow(QMainWindow):
     def on_user_logged_out(self):
         # для события выхода
         print("Событие: UserLoggedOut")
+        self.disable_anti_screenshot()
         if hasattr(self, 'clipboard_service'):
             self.clipboard_service.on_vault_lock()
         self.hide()
@@ -264,8 +264,8 @@ class MainWindow(QMainWindow):
         self.ephemeral_action.setChecked(False)
         self.ephemeral_action.setToolTip(
             "Включить эфемерный режим\n"
-            "В этом режиме пароли НЕ попадают в системный буфер обмена.\n"
-            "Для вставки используйте пункт меню 'Вставить из эфемерного буфера'."
+            "В этом режиме пароли НЕ попадают в системный буфер обмена."
+
         )
         self.ephemeral_action.toggled.connect(self._on_ephemeral_action_toggled)
         toolbar.addAction(self.ephemeral_action)
@@ -286,15 +286,10 @@ class MainWindow(QMainWindow):
 
 
     def _on_ephemeral_action_toggled(self, checked):
-        """
-        Обработчик кнопки эфемерного режима в тулбаре.
-        Просто делегирует логику сервису. UI обновится через сигнал.
-        """
+         #Обработчик кнопки эфемерного режима в тулбаре.
         print(f"[MainWindow] Ephemeral action toggled: {checked}")
         if hasattr(self, 'clipboard_service'):
             self.clipboard_service.set_ephemeral_mode(checked)
-
-            # Если включаем режим, можно показать краткую подсказку один раз
             if checked:
                 QMessageBox.information(self, "Эфемерный режим",
                                         "Пароли больше не попадают в историю буфера обмена.\n"
@@ -328,16 +323,16 @@ class MainWindow(QMainWindow):
         self.status_bar = self.statusBar()
         self.status_bar.showMessage("Система готова")
 
-        # Таймер очистки (будет справа)
+        # таймер очистки
         self.timer_label = QLabel("")
         self.status_bar.addPermanentWidget(self.timer_label)
 
-        # Превью буфера (будет справа, рядом с таймером)
+        # превью буфера
         self.clipboard_preview = QLabel("Буфер: пусто")
         self.clipboard_preview.setStyleSheet("color: #888; padding: 0 10px;")
         self.status_bar.addPermanentWidget(self.clipboard_preview)
 
-        # Индикатор эфемерного режима (САМЫЙ ПРАВЫЙ)
+        # индикатор эфемерного режима
         self._ephemeral_status_indicator = QLabel("🔒 EPHEMERAL MODE")
         self._ephemeral_status_indicator.setStyleSheet(
             "color: #27ae60; font-weight: bold; padding: 2px 8px; background-color: #2c3e50; border-radius: 3px; margin: 2px;"
@@ -376,13 +371,11 @@ class MainWindow(QMainWindow):
 
 
     def update_timer_label_service(self, seconds: int):
-        """Слот для обновления лейбла таймера из сервиса."""
+         #обновление таймера
         if seconds > 0:
             self.timer_label.setText(f"Буфер очистится через: {seconds}с  ")
         else:
             self.timer_label.setText("")
-
-
 
     def copy_password(self, password):  # функция копирования запускающая процесс
         QApplication.clipboard().setText(password)
@@ -428,7 +421,7 @@ class MainWindow(QMainWindow):
         print(" ДИАГНОСТИКА ВХОДА")
         print(f"Пароль получен, длина: {len(password)}")
 
-        # Проверяем наличие хеша
+        # Проверка наличие хеша
         stored_hash = self.db_helper.get_setting("master_hash")
         print(f"Хеш в БД: {stored_hash is not None}")
         if stored_hash:
@@ -493,7 +486,6 @@ class MainWindow(QMainWindow):
             }
             # Использование EntryManager вместо прямого шифрования
             self.entry_manager.create_entry(entry_data)
-
             self.statusBar().showMessage(f"Запись {service} добавлена", 5000)
 
         except Exception as e:
@@ -503,16 +495,17 @@ class MainWindow(QMainWindow):
 
     def get_password_for_entry(self, entry_id: int) -> str:
         #геттер пароля для виджета таблицы
-        
+
         if not entry_id:
             return ""
         try:
-            # Расшифровка происходит только здесь 
+            # Расшифровка происходит только здесь
             entry_data = self.entry_manager.get_entry(entry_id)
             return entry_data.get('password', '')
         except Exception as e:
             print(f"Secure getter error: {e}")
             return "ERROR"
+
     def load_data_from_db(self):
         try:
             self.table.setRowCount(0)
@@ -553,14 +546,14 @@ class MainWindow(QMainWindow):
                     }
                     cache_list.append(cache_entry)
 
-                    # ВАЖНО: copy_callback передаем None, так как используем сигналы SecureTable
+
                     self.table.add_record(
                         service_name,
                         username,
                         category,
                         "••••••••",
                         notes,
-                        None,  # copy_callback больше не нужен в старом формате
+                        None,
                         record_id=rec_id,
                         modified_date=modified,
                         url=url,
@@ -873,8 +866,6 @@ class MainWindow(QMainWindow):
             self.db_helper.save_search_query(query)
         except Exception as e:
             print(f"Ошибка сохранения истории поиска в БД: {e}")
-
-        # Также сохраняем в QSettings для UI автодополнения
         history = self.settings.value("search_history", [], type=list)
         if query in history:
             history.remove(query)
@@ -886,19 +877,16 @@ class MainWindow(QMainWindow):
         self.completer.setModel(QStringListModel(history, self))
 
     def manual_clear_clipboard(self):
-        """Ручная очистка буфера через UI."""
+         #ручная очистка
         self.clipboard_service.clear_now()
         self.statusBar().showMessage("Буфер обмена очищен вручную", 3000)
 
     def _on_ephemeral_mode_changed(self, enabled):
-        """
-        MON-4: Обработчик изменения эфемерного режима.
-        Индикатор в строке статуса (самый надежный вариант).
-        """
+         #эфемерный режим
         print(f"[MainWindow] Ephemeral mode changed: {enabled}")
 
         if enabled:
-            # Показываем сообщение в статус-баре
+            # показ сообщения в статус-баре
             self.statusBar().showMessage(
                 "🔒 Эфемерный режим ВКЛЮЧЕН - пароли не попадают в системный буфер. Используйте Ctrl+V для вставки",
                 5000
@@ -915,23 +903,22 @@ class MainWindow(QMainWindow):
             else:
                 self._ephemeral_status_indicator.setVisible(True)
 
-            # Синхронизируем кнопку
+            # Синхронизация кнопки
             if hasattr(self, 'ephemeral_action') and not self.ephemeral_action.isChecked():
                 self.ephemeral_action.setChecked(True)
 
         else:
-            # Скрываем индикатор
+            # Скрытие индикатора
             if hasattr(self, '_ephemeral_status_indicator'):
                 self._ephemeral_status_indicator.setVisible(False)
 
             self.statusBar().showMessage("Эфемерный режим ВЫКЛЮЧЕН", 3000)
 
-            # Синхронизируем кнопку
+            # синхронизация кнопки
             if hasattr(self, 'ephemeral_action') and self.ephemeral_action.isChecked():
                 self.ephemeral_action.setChecked(False)
     def _create_ephemeral_indicator(self):
-        """Создает индикатор эфемерного режима в тулбаре."""
-        # Находим тулбар
+        #индикатор эфемерного режима
         toolbar = None
         for tb in self.findChildren(QToolBar):
             if tb.windowTitle() == "Main Toolbar":
@@ -951,10 +938,7 @@ class MainWindow(QMainWindow):
         print("[MainWindow] Ephemeral indicator created in _create_ephemeral_indicator")
 
     def integrate_ephemeral_paste_for_widget(self, line_edit: QLineEdit):
-        """
-        MON-4: Интеграция эфемерной вставки для поля ввода.
-        Добавляет пункт в контекстное меню для вставки из эфемерного буфера.
-        """
+        #вставка в эфемерном режиме
         if not hasattr(self, 'clipboard_service'):
             return
 
@@ -963,7 +947,7 @@ class MainWindow(QMainWindow):
         def custom_context_menu(pos):
             menu = QMenu(line_edit)
 
-            # Стандартные действия
+            # стандартные действия
             copy_action = menu.addAction("📋 Копировать")
             copy_action.triggered.connect(line_edit.copy)
 
@@ -972,7 +956,7 @@ class MainWindow(QMainWindow):
 
             menu.addSeparator()
 
-            # Эфемерная вставка (если есть данные)
+            # Эфемерная вставка
             ephemeral_action = QAction("🔒 Вставить из эфемерного буфера (безопасно)", line_edit)
             has_ephemeral = (self.clipboard_service.defender.has_ephemeral_data()
                              if hasattr(self.clipboard_service, 'defender') else False)
@@ -990,9 +974,7 @@ class MainWindow(QMainWindow):
         line_edit.customContextMenuRequested.connect(custom_context_menu)
 
     def _ephemeral_paste_to_field(self, line_edit: QLineEdit):
-        """
-        MON-4: Вставка пароля из эфемерного буфера в поле
-        """
+        # Вставка пароля из эфемерного буфера в поле
         password = self.clipboard_service.get_ephemeral_password()
         if password:
             line_edit.setText(password)
@@ -1006,15 +988,15 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Нет данных в эфемерном буфере", 2000)
 
     def copy_password_to_clipboard(self, entry_id):
-        print(f"[MainWindow] copy_password_to_clipboard slot hit! ID: {entry_id}")
-        """Копирует только пароль."""
+        #print(f"[MainWindow] copy_password_to_clipboard slot hit! ID: {entry_id}")
+        #копирование пароля
         if not entry_id: return
         try:
             entry_data = self.entry_manager.get_entry(entry_id)
             password = entry_data.get('password', '')
             if password:
                 self.clipboard_service.copy_password(entry_id, password)
-                # ПРОВЕРКА: Показываем уведомление только если включено
+                # показ уведомлений только если включено
                 if self.clipboard_service.are_notifications_enabled():
                     self.show_toast("🔑 Пароль скопирован")
             else:
@@ -1029,7 +1011,6 @@ class MainWindow(QMainWindow):
             username = entry_data.get('username', '')
             if username:
                 self.clipboard_service.copy_username(entry_id, username)
-                # ПРОВЕРКА
                 if self.clipboard_service.are_notifications_enabled():
                     self.show_toast("👤 Логин скопирован")
             else:
@@ -1045,21 +1026,20 @@ class MainWindow(QMainWindow):
             password = entry_data.get('password', '')
             data_str = f"{username}\t{password}"
             self.clipboard_service.copy_all(entry_id, data_str)
-            # ПРОВЕРКА
             if self.clipboard_service.are_notifications_enabled():
                 self.show_toast("📋 Данные скопированы")
         except Exception as e:
             print(f"Error copying all: {e}")
 
     def on_clipboard_copied(self, entry_id):
-        """Обновление UI после копирования."""
+        #Обновление UI после копирования
         # Подсвечиваем строку в таблице
         self.table.highlight_row(entry_id)
         # Обновляем превью в статус-баре
         self.update_clipboard_preview()
 
     def on_clipboard_cleared(self):
-        """Обновление UI после очистки."""
+        #Обновление UI после очистки
         self.table.remove_highlight()
         self.statusBar().showMessage("Буфер очищен", 3000)
         self.clear_clipboard_preview()
@@ -1067,17 +1047,13 @@ class MainWindow(QMainWindow):
             self.show_toast("🧹 Буфер очищен")
 
     def show_clear_warning(self):
-        """Предупреждение за 5 секунд до очистки."""
+        #Предупреждение за 5 секунд до очистки
         if self.clipboard_service.are_notifications_enabled():
             self.show_toast("⚠️ Буфер очистится через 5 секунд!")
         self.statusBar().showMessage("⚠️ Внимание! Буфер очистится через 5 секунд", 5000)
 
     def show_toast(self, message: str):
-        """
-        Простая реализация Toast-уведомления.
-        В идеале использовать системные уведомления (D-Bus / Windows Toast),
-        но для примера используем всплывающий QLabel.
-        """
+        #всплывающие уведомления
         if not hasattr(self, '_toast_label'):
             self._toast_label = QLabel(self)
             self._toast_label.setStyleSheet("""
@@ -1103,10 +1079,8 @@ class MainWindow(QMainWindow):
         # Таймер скрытия
         QTimer.singleShot(2000, self._toast_label.hide)
 
-    # --- Clipboard Preview Widget (Sprint 5) ---
-
     def update_clipboard_preview(self):
-        """Обновление превью буфера в статус-баре."""
+        # обновление превью буфера в статус-баре
         if not hasattr(self, 'clipboard_preview'):
             return
 
@@ -1120,7 +1094,7 @@ class MainWindow(QMainWindow):
                 if entry_info:
                     source = entry_info.get('service', 'Unknown')
 
-                    # Маскирование контента
+                    # Маскировака контента
                     preview_text = "••••••••"
                     if data_type == 'username':
                         preview_text = entry_info.get('username', '')
@@ -1139,30 +1113,26 @@ class MainWindow(QMainWindow):
             self.clipboard_preview.setText("Буфер: пусто")
             self.clipboard_preview.setStyleSheet("color: #888; padding: 0 10px;")
 
-    # --- Anti-Screenshot Protection (Req 6.3.3) ---
 
     def enable_anti_screenshot(self):
-        """
-        Включает защиту окна от скриншотов (WDA_EXCLUDEFROMCAPTURE).
-        Окно становится черным/невидимым для программ захвата экрана.
-        """
-        print("[MainWindow] Enabling Anti-Screenshot protection...")
+        # антискриншот
+        # print("[MainWindow] Enabling Anti-Screenshot protection...")
 
+        if self._anti_screenshot_enabled:
+            return
         if platform.system() == "Windows":
             try:
                 import ctypes
                 # Получаем дескриптор окна (HWND)
                 hwnd = int(self.winId())
 
-                # Используем User32.dll -> SetWindowDisplayAffinity
-                # WDA_EXCLUDEFROMCAPTURE = 0x00000011 (Windows 8.1+)
-                # Этот флаг говорит системе: "Не разрешай захват этого окна другим процессам"
                 user32 = ctypes.windll.user32
                 WDA_EXCLUDEFROMCAPTURE = 0x00000011
 
                 result = user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
 
                 if result:
+                    self._anti_screenshot_enabled =True
                     print("[MainWindow] SUCCESS: Window protected from capture (WDA_EXCLUDEFROMCAPTURE).")
                 else:
                     error = ctypes.get_last_error()
@@ -1171,16 +1141,14 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"[MainWindow] Error enabling Anti-Screenshot: {e}")
         else:
-            # Для macOS/Linux можно добавить другие реализации
             pass
 
     def disable_anti_screenshot(self):
-        """
-        Выключает защиту окна от скриншотов.
-        Восстанавливает нормальный захват экрана.
-        """
-        print("[MainWindow] Disabling Anti-Screenshot protection...")
+        # Выключает защиту окна от скриншотов.
+        # print("[MainWindow] Disabling Anti-Screenshot protection...")
 
+        if not self._anti_screenshot_enabled:
+            return
         if platform.system() == "Windows":
             try:
                 import ctypes
@@ -1191,6 +1159,7 @@ class MainWindow(QMainWindow):
                 result = user32.SetWindowDisplayAffinity(hwnd, WDA_NONE)
 
                 if result:
+                    self._anti_screenshot_enabled = False
                     print("[MainWindow] SUCCESS: Window capture restored.")
                 else:
                     print("[MainWindow] FAILED to restore window capture.")
@@ -1199,7 +1168,7 @@ class MainWindow(QMainWindow):
                 print(f"[MainWindow] Error disabling Anti-Screenshot: {e}")
 
     def open_settings_dialog(self):
-        """Req 7: Opens the configuration dialog."""
+        # открытие окна настроек
         if not self.auth_service.is_authenticated():
             QMessageBox.warning(self, "Ошибка", "Сначала войдите в систему.")
             return
@@ -1213,8 +1182,7 @@ class MainWindow(QMainWindow):
             print("[MainWindow] Settings updated successfully.")
 
     def _on_settings_updated(self):
-        """Callback after settings are saved."""
-        # Можно обновить UI элементы, зависящие от настроек
+        # вызов после сохранения настроек
         pass
 
 

@@ -4,18 +4,14 @@ from typing import Optional
 
 
 class PlatformAdapter:
-    """
-    Адаптер для работы с системным буфером обмена на разных платформах.
-    Инкапсулирует вызовы pyperclip или нативных API.
-    """
+    #Адаптер для работы с системным буфером обмена на разных платформах
 
     def __init__(self):
         self.platform = sys.platform
 
     def copy_to_clipboard(self, text: str) -> bool:
-        """Копирует текст в системный буфер обмена."""
+        #Копирует текст в системный буфер обмена
         try:
-            # Предпочитаем PyQt6, так как он уже используется в проекте
             from PyQt6.QtWidgets import QApplication
             clipboard = QApplication.clipboard()
             clipboard.setText(text)
@@ -35,11 +31,7 @@ class PlatformAdapter:
 
         return False
     def clear_clipboard(self) -> bool:
-        """
-        Безопасно очищает буфер обмена.
-        ИСПОЛЬЗУЕТСЯ ПЕРЕЗАПИСЬ вместо простого clear(),
-        так как Windows Clipboard History может игнорировать очистку.
-        """
+        #очищает буфер обмена
         try:
             from PyQt6.QtWidgets import QApplication
             clipboard = QApplication.clipboard()
@@ -54,7 +46,7 @@ class PlatformAdapter:
 
         try:
             import pyperclip
-            # pyperclip.copy перезаписывает содержимое
+            #  перезаписывает содержимое
             pyperclip.copy("")
             return True
         except Exception as e:
@@ -63,7 +55,7 @@ class PlatformAdapter:
         return False
 
     def get_clipboard_content(self) -> Optional[str]:
-        """Получает текущее содержимое буфера (для проверки)."""
+        #Получает текущее содержимое буфера
         try:
             from PyQt6.QtWidgets import QApplication
             clipboard = QApplication.clipboard()

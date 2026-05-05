@@ -80,20 +80,20 @@ class SecureTable(QTableWidget):
         item_login.setToolTip(str(login))
         self.setItem(row_position, 1, item_login)
 
-        # 3. URL
+        #  URL
         domain = self._extract_domain(str(url))
         item_url = QTableWidgetItem(domain)
         item_url.setToolTip(str(url))
         self.setItem(row_position, 2, item_url)
 
-        # 4. Категория
+        #  Категория
         self.setItem(row_position, 3, QTableWidgetItem(str(category)))
 
-        # 5. Пароль (всегда скрыт изначально)
+        #  Пароль (всегда скрыт изначально)
         item_pass = QTableWidgetItem("••••••••")
         self.setItem(row_position, 4, item_pass)
 
-        # 6. Кнопки действий
+        #  Кнопки действий
         container = QWidget()
         layout = QHBoxLayout(container)
         layout.setContentsMargins(2, 2, 2, 2)
@@ -115,7 +115,7 @@ class SecureTable(QTableWidget):
         if record_id is not None:
             copy_user_btn.clicked.connect(lambda checked=False, eid=record_id: self.copy_username_requested.emit(eid))
 
-        # Кнопка показа (глаз)
+        # Кнопка показа
         toggle_btn = QPushButton("👁")
         toggle_btn.setToolTip("Показать/Скрыть")
         toggle_btn.setFixedSize(QSize(28, 24))
@@ -129,9 +129,9 @@ class SecureTable(QTableWidget):
         self.setCellWidget(row_position, 5, container)
 
 
-    # Sprint 5: Индикация строки в буфере
+    # Индикация строки в буфере
     def highlight_row(self, entry_id):
-        """Подсвечивает строку, чей контент сейчас в буфере."""
+        #Подсвечивает строку, чей контент сейчас в буфере
         self._active_clipboard_row = -1
         # Сброс подсветки всех строк
         for row in range(self.rowCount()):
@@ -153,7 +153,7 @@ class SecureTable(QTableWidget):
                 break
 
     def remove_highlight(self):
-        """Снимает подсветку при очистке буфера."""
+        #Снимает подсветку при очистке буфера
         if self._active_clipboard_row != -1:
             for col in range(self.columnCount()):
                 item = self.item(self._active_clipboard_row, col)
