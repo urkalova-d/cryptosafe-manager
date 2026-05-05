@@ -6,6 +6,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 # Импортируем сервис шифрования
 from .encryption_service import EncryptionService
 from .password_generator import PasswordGenerator
+from src.core.events import event_bus, EventType
 
 from thefuzz import fuzz
 import hmac 
@@ -52,11 +53,13 @@ class EntryManager(QObject):
             # Правильное сохранение: передаем зашифрованный BLOB и теги
             entry_id = self.db.add_entry(encrypted_blob, tags=tags)
 
-            # интеграция на 5 спринт
-            self._log_audit_event("CREATE", entry_id)
-
-            #  Публикуем событие
-            self.EntryCreated.emit(entry_id)
+            #  Публикация события
+            if entry_id:
+                event_bus.publish(EventType.ENTRY_ADDED, {
+                    'action': 'create',
+                    'entry_id': entry_id,
+                    'service': data.get('service', 'unknown')
+                })
             return entry_id
 
         except Exception as e:
@@ -137,10 +140,16 @@ class EntryManager(QObject):
             self.db.update_entry(entry_id, encrypted_blob, tags=tags)
 
             # интеграция на будущие спринты
-            self._log_audit_event("UPDATE", entry_id)
+            success = self.db.update_entry(entry_id, encrypted_blob, tags)
 
-            self.EntryUpdated.emit(entry_id)
-            return entry_id
+            # === НОВОЕ: Публикация события ===
+            if success:
+                event_bus.publish(EventType.ENTRY_UPDATED, {
+                    'action': 'update',
+                    'entry_id': entry_id
+                })
+            return success
+
         except Exception as e:
             print(f"Error updating entry: {e}")
             raise e
@@ -153,16 +162,21 @@ class EntryManager(QObject):
             else:
                 self.db.hard_delete_entry(entry_id)
 
-            # интеграция на спринты
-            self._log_audit_event("DELETE", entry_id)
+            #Публикация события
+            event_bus.publish(EventType.ENTRY_DELETED, {
+                'action': 'delete',
+                'entry_id': entry_id,
+                'soft_delete': soft_delete
+            })
 
+            # Старый сигнал
             self.EntryDeleted.emit(entry_id)
 
         except Exception as e:
             print(f"Error deleting entry: {e}")
             raise e
 
-        # Sprint 4 Placeholder: Clipboard Integration
+
     def copy_to_clipboard_secure(self, entry_id: int):
         self.EntryCopied.emit(entry_id)
         print(f"[Integration] EntryCopied signal emitted for ID {entry_id}")

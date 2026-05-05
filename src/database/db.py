@@ -22,6 +22,42 @@ class DatabaseHelper:
     def init_db(self):
         with self._lock:
             cursor = self.conn.cursor()
+
+            # === Удаляем старую таблицу аудита (миграция Sprint 5) ===
+            cursor.execute("DROP TABLE IF EXISTS audit_log")
+            cursor.execute("DROP TABLE IF EXISTS audit_public_keys")
+
+            # === REQ DB-1: Новая таблица аудита ===
+            cursor.execute("""
+                            CREATE TABLE IF NOT EXISTS audit_log (
+                                sequence_number INTEGER PRIMARY KEY AUTOINCREMENT,
+                                timestamp TEXT NOT NULL,
+                                event_type TEXT NOT NULL,
+                                severity TEXT NOT NULL,
+                                source TEXT,
+                                user_id TEXT,
+                                details TEXT,
+                                previous_hash TEXT NOT NULL,
+                                entry_hash TEXT NOT NULL,
+                                signature TEXT NOT NULL
+                            )
+                        """)
+
+            # Таблица для хранения публичных ключей верификации
+            cursor.execute("""
+                            CREATE TABLE IF NOT EXISTS audit_public_keys (
+                                key_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                public_key TEXT NOT NULL,
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                is_active INTEGER DEFAULT 1
+                            )
+                        """)
+
+            # === REQ DB-3: Индексы ===
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_event_type ON audit_log(event_type)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_sequence ON audit_log(sequence_number)")
+
             # таблица для записей (хранится только ID и зашифрованный BLOB)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS vault_entries (
@@ -68,11 +104,7 @@ class DatabaseHelper:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                             )
                         """)
-            cursor.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES (?, ?)",
-                           ("auto_lock_timeout", "3600"))
-            # Политика паролей: минимум 12 символов
-            cursor.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES (?, ?)",
-                           ("policy_min_length", "12"))
+
             # История поиска
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS search_history (
@@ -81,20 +113,6 @@ class DatabaseHelper:
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-
-            # === REQ 9.2: Таблица аудита ===
-            cursor.execute("""
-                            CREATE TABLE IF NOT EXISTS audit_log (
-                                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                                event_type TEXT NOT NULL,
-                                entry_id INTEGER,
-                                details TEXT,
-                                ip_address TEXT
-                            )""")
-
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_event_type ON audit_log(event_type)")
 
             # Дефолтные настройки
             cursor.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES (?, ?)",
@@ -433,6 +451,64 @@ class DatabaseHelper:
 
     def cleanup_expired_deleted(self):
         self.conn.execute("DELETE FROM deleted_entries WHERE expiration_timestamp <= datetime('now')")
+
+    def add_audit_entry(self, entry_data: dict, signature_hex: str, entry_hash: str, prev_hash: str):
+        """Добавляет подписанную запись в журнал аудита."""
+        with self._lock:
+            self.conn.execute("""
+                INSERT INTO audit_log 
+                (timestamp, event_type, severity, source, user_id, details, previous_hash, entry_hash, signature)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                entry_data['timestamp'],
+                entry_data['event_type'],
+                entry_data['severity'],
+                entry_data.get('source'),
+                entry_data.get('user_id'),
+                json.dumps(entry_data.get('details', {})),
+                prev_hash,
+                entry_hash,
+                signature_hex
+            ))
+            self.conn.commit()
+
+    def get_last_audit_entry(self):
+        """Получает последнюю запись для построения цепочки."""
+        with self._lock:
+            cursor = self.conn.execute("""
+                SELECT sequence_number, entry_hash 
+                FROM audit_log 
+                ORDER BY sequence_number DESC LIMIT 1
+            """)
+            return cursor.fetchone()
+
+    def get_audit_entries(self, limit=100, offset=0):
+        """Получает список записей с пагинацией."""
+        with self._lock:
+            cursor = self.conn.execute("""
+                SELECT sequence_number, timestamp, event_type, severity, source, user_id, details, signature
+                FROM audit_log 
+                ORDER BY sequence_number DESC
+                LIMIT ? OFFSET ?
+            """, (limit, offset))
+            return cursor.fetchall()
+
+    def save_audit_public_key(self, public_key_hex: str):
+        """Сохраняет публичный ключ верификации."""
+        with self._lock:
+            # Деактивируем старые ключи
+            self.conn.execute("UPDATE audit_public_keys SET is_active = 0")
+            self.conn.execute("""
+                INSERT INTO audit_public_keys (public_key, is_active)
+                VALUES (?, 1)
+            """, (public_key_hex,))
+            self.conn.commit()
+
+    def get_active_public_key(self):
+        with self._lock:
+            cursor = self.conn.execute("SELECT public_key FROM audit_public_keys WHERE is_active = 1 LIMIT 1")
+            row = cursor.fetchone()
+            return row[0] if row else None
 
 
 

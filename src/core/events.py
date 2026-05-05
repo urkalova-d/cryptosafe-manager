@@ -1,11 +1,28 @@
-
 from enum import Enum, auto
 
 class EventType(Enum):
+    # Системные
     SETTINGS_CHANGED = auto()
     DATABASE_UPDATED = auto()
+
+    # Аутентификация
     AUTH_SUCCESS = auto()
-    ENTRY_ADDED = auto()  # Добавляем для прохождения теста test_event_bus_publishing
+    AUTH_FAILURE = auto()
+    USER_LOGGED_IN = auto()
+    USER_LOGGED_OUT = auto()
+
+    # Хранилище
+    ENTRY_ADDED = auto()
+    ENTRY_UPDATED = auto()
+    ENTRY_DELETED = auto()
+    ENTRY_READ = auto()
+    ENTRY_COPIED = auto()
+
+    # Буфер обмена
+    CLIPBOARD_COPY = auto()
+    CLIPBOARD_CLEAR = auto()
+
+
 class EventBus:
     def __init__(self):
         self.subscribers = {}
