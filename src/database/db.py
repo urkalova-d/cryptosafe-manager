@@ -149,6 +149,26 @@ class DatabaseHelper:
                             END
                         """)
 
+            # Защита от изменения записей
+            cursor.execute("""
+                            CREATE TRIGGER IF NOT EXISTS prevent_audit_update
+                            BEFORE UPDATE ON audit_log
+                            FOR EACH ROW
+                            BEGIN
+                                SELECT RAISE(FAIL, 'SECURITY: Audit logs cannot be updated.');
+                            END;
+                        """)
+
+            # Защита от удаления записей
+            cursor.execute("""
+                            CREATE TRIGGER IF NOT EXISTS prevent_audit_delete
+                            BEFORE DELETE ON audit_log
+                            FOR EACH ROW
+                            BEGIN
+                                SELECT RAISE(FAIL, 'SECURITY: Audit logs cannot be deleted.');
+                            END;
+                        """)
+
             self.conn.commit()
 
     def add_audit_log(self, event_type: str, entry_id: int = None, details: str = None):
