@@ -23,9 +23,6 @@ class DatabaseHelper:
         with self._lock:
             cursor = self.conn.cursor()
 
-            # === Удаляем старую таблицу аудита (миграция Sprint 5) ===
-            cursor.execute("DROP TABLE IF EXISTS audit_log")
-            cursor.execute("DROP TABLE IF EXISTS audit_public_keys")
 
             # === REQ DB-1: Новая таблица аудита ===
             cursor.execute("""

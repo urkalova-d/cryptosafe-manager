@@ -24,6 +24,7 @@ from src.core.crypto.authentication import AuthenticationService
 from src.core.vault.encryption_service import EncryptionService
 from src.core.clipboard import ClipboardService, PlatformAdapter, ClipboardMonitor
 from src.core.audit import AuditLogger, AuditLogSigner
+from src.core.audit.log_verifier import LogVerifier
 class LoadDataWorker(QObject):
     # Сигнал передает список расшифрованных записей
     finished = pyqtSignal(list)
@@ -161,7 +162,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         print("Закрытие приложения -> Очистка памяти")
         self.disable_anti_screenshot()
-        self.clipboard_service.clear_now()
+        if hasattr(self, 'clipboard_service'):
+            self.clipboard_service.clear_now()
         self.auth_service.logout()
         super().closeEvent(event)
 
@@ -181,19 +183,36 @@ class MainWindow(QMainWindow):
 
         try:
             print("[MainWindow] Initializing Audit Logger...")
-            # 1. Создаем подписыватель (ему нужен key_manager для получения ключа)
             signer = AuditLogSigner(self.key_manager)
-
-            # 2. Создаем логгер
             self.audit_logger = AuditLogger(self.db_helper, signer)
-
-            # 3. Запускаем (создаем Genesis блок и подписываемся на события)
             self.audit_logger.start()
-            print("[MainWindow] Audit Logger started successfully.")
+
+            # === VER-1: Startup Verification ===
+            print("[MainWindow] Verifying audit log integrity...")
+            verifier = LogVerifier(self.db_helper, signer)
+            verification_result = verifier.verify_all()
+
+            if verification_result['verified']:
+                print(f"[MainWindow] Audit Log Integrity: OK ({verification_result['total_checked']} entries)")
+            else:
+                # Формируем детальное сообщение
+                msg = f"Audit Log Integrity FAILED!\n" \
+                      f"Invalid Hashes: {len(verification_result.get('invalid_hashes', []))}\n" \
+                      f"Chain breaks: {len(verification_result.get('chain_breaks', []))}"
+                print(f"[MainWindow] {msg}")
+                QMessageBox.critical(self, "Security Alert",
+                                     "CRITICAL: Audit log tampering detected! The database may be compromised.")
+
+            # === VER-2: Periodic Verification (СЮДА ВСТАВЛЯТЬ) ===
+            self.periodic_verify_timer = QTimer(self)
+            self.periodic_verify_timer.timeout.connect(self.periodic_audit_check)
+            # Запуск раз в 24 часа (для теста можно поставить 60000 = 1 минута)
+            self.periodic_verify_timer.start(24 * 60 * 60 * 1000)
+
         except Exception as e:
             print(f"[MainWindow] CRITICAL: Failed to start Audit Logger: {e}")
-            # Можно показать предупреждение, но не обязательно крашить приложение
             QMessageBox.warning(self, "Ошибка Аудита", f"Не удалось запустить систему аудита: {e}")
+
         self.load_data_from_db()
         self.enable_anti_screenshot()
         # показ главного окна
@@ -249,6 +268,8 @@ class MainWindow(QMainWindow):
 
         # просмотр
         view_menu = menubar.addMenu("Просмотр")
+        verify_action = view_menu.addAction("🛡️ Проверить целостность логов")
+        verify_action.triggered.connect(self.manual_verify_audit_logs)
         view_menu.addAction("Журналы")
         settings_action = view_menu.addAction("⚙️ Настройки")
         settings_action.triggered.connect(self.open_settings_dialog)
@@ -1208,4 +1229,60 @@ class MainWindow(QMainWindow):
         # вызов после сохранения настроек
         pass
 
+    #  Ручная проверка
+    def manual_verify_audit_logs(self):
+        if not hasattr(self, 'audit_logger') or not self.audit_logger:
+            QMessageBox.warning(self, "Ошибка", "Система аудита не запущена.")
+            return
+
+        from src.core.audit.log_verifier import LogVerifier
+
+        verifier = LogVerifier(self.db_helper, self.audit_logger.signer)
+        results = verifier.verify_all()
+
+        # Формируем отчет
+        report = f"Проверено записей: {results['total_checked']}\n\n"
+
+        if results['verified']:
+            report += "✅ Статус: Целостность ПОДТВЕРЖДЕНА.\nВсе записи валидны."
+            QMessageBox.information(self, "Проверка Аудита", report)
+        else:
+            report += "❌ Статус: ОБНАРУЖЕНО ВМЕШАТЕЛЬСТВО!\n\n"
+            if results['invalid_hashes']:
+                report += f"Измененные данные: {len(results['invalid_hashes'])}\n"
+            if results['chain_breaks']:
+                report += f"Разрывы цепочки: {len(results['chain_breaks'])}\n"
+
+            # VER-4: Уведомление и реакция
+            QMessageBox.critical(self, "Security Alert!", report)
+
+            # Опционально: Блокировка хранилища
+            # self.auth_service.logout()
+
+    def periodic_audit_check(self):
+        """VER-2: Периодическая проверка целостности"""
+        print("[Security] Running periodic audit check...")
+        if not hasattr(self, 'audit_logger'): return
+
+        from src.core.audit.log_verifier import LogVerifier
+        verifier = LogVerifier(self.db_helper, self.audit_logger.signer)
+        # Проверяем последние 1000 записей
+        results = verifier.verify_all(limit=1000)
+
+        if not results['verified']:
+            QMessageBox.critical(self, "Security Alert",
+                                 "Tampering detected during periodic check!")
+
+    def periodic_audit_check(self):
+        print("[Security] Running periodic audit check...")
+        # Просто вызываем метод ручной проверки, но без диалога, если все ОК
+        if not hasattr(self, 'audit_logger'): return
+
+        from src.core.audit.log_verifier import LogVerifier
+        verifier = LogVerifier(self.db_helper, self.audit_logger.signer)
+        results = verifier.verify_all(limit=1000)  # Проверяем последние 1000
+
+        if not results['verified']:
+            QMessageBox.critical(self, "Security Alert", "Tampering detected during periodic check!")
+            self.auth_service.logout()
 

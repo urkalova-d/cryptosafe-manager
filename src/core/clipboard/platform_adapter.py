@@ -30,6 +30,7 @@ class PlatformAdapter:
             print(f"[PlatformAdapter] CRITICAL: Fallback failed: {e}")
 
         return False
+
     def clear_clipboard(self) -> bool:
         #очищает буфер обмена
         try:
