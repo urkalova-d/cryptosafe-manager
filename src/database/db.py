@@ -24,7 +24,7 @@ class DatabaseHelper:
             cursor = self.conn.cursor()
 
 
-            # === REQ DB-1: Новая таблица аудита ===
+            # Новая таблица аудита
             cursor.execute("""
                             CREATE TABLE IF NOT EXISTS audit_log (
                                 sequence_number INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -490,6 +490,55 @@ class DatabaseHelper:
             """, (limit, offset))
             return cursor.fetchall()
 
+    def get_filtered_audit_logs(self, limit: int, offset: int, filters: dict = None):
+        """
+        Получает отфильтрованные логи с пагинацией.
+        Возвращает (список записей, общее количество записей).
+        """
+        with self._lock:
+            base_query = "FROM audit_log WHERE 1=1"
+            params = []
+
+            if filters:
+                # Фильтр по типу (начинается с...)
+                if filters.get('event_type_like'):
+                    base_query += " AND event_type LIKE ?"
+                    params.append(filters['event_type_like'])
+
+                # Фильтр по важности
+                if filters.get('severity'):
+                    base_query += " AND severity = ?"
+                    params.append(filters['severity'])
+
+                # Фильтр по дате (строго ISO формат)
+                if filters.get('start_date'):
+                    base_query += " AND timestamp >= ?"
+                    params.append(filters['start_date'])
+                if filters.get('end_date'):
+                    base_query += " AND timestamp <= ?"
+                    params.append(filters['end_date'])
+
+                # Поиск по тексту (подстрока)
+                if filters.get('search_text_like'):
+                    base_query += " AND (event_type LIKE ? OR severity LIKE ? OR timestamp LIKE ? OR details LIKE ?)"
+                    search_param = filters['search_text_like']
+                    # Добавляем параметр 4 раза для каждого OR условия
+                    params.extend([search_param, search_param, search_param, search_param])
+
+            # Запрос общего количества
+            count_query = f"SELECT COUNT(*) {base_query}"
+            cursor = self.conn.execute(count_query, params)
+            total_count = cursor.fetchone()[0]
+
+            # Запрос данных с пагинацией
+            data_query = f"SELECT * {base_query} ORDER BY sequence_number DESC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+
+            cursor = self.conn.execute(data_query, params)
+            rows = cursor.fetchall()
+
+            return rows, total_count
+
     def save_audit_public_key(self, public_key_hex: str):
         """Сохраняет публичный ключ верификации."""
         with self._lock:
@@ -506,6 +555,7 @@ class DatabaseHelper:
             cursor = self.conn.execute("SELECT public_key FROM audit_public_keys WHERE is_active = 1 LIMIT 1")
             row = cursor.fetchone()
             return row[0] if row else None
+
 
 
 

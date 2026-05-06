@@ -25,6 +25,7 @@ from src.core.vault.encryption_service import EncryptionService
 from src.core.clipboard import ClipboardService, PlatformAdapter, ClipboardMonitor
 from src.core.audit import AuditLogger, AuditLogSigner
 from src.core.audit.log_verifier import LogVerifier
+from src.gui.audit_viewer import AuditViewer
 class LoadDataWorker(QObject):
     # Сигнал передает список расшифрованных записей
     finished = pyqtSignal(list)
@@ -270,7 +271,8 @@ class MainWindow(QMainWindow):
         view_menu = menubar.addMenu("Просмотр")
         verify_action = view_menu.addAction("🛡️ Проверить целостность логов")
         verify_action.triggered.connect(self.manual_verify_audit_logs)
-        view_menu.addAction("Журналы")
+        logs_action = view_menu.addAction("📜 Журналы аудита")  # ИЗМЕНЕНО
+        logs_action.triggered.connect(self.open_audit_viewer)
         settings_action = view_menu.addAction("⚙️ Настройки")
         settings_action.triggered.connect(self.open_settings_dialog)
 
@@ -1259,19 +1261,15 @@ class MainWindow(QMainWindow):
             # Опционально: Блокировка хранилища
             # self.auth_service.logout()
 
-    def periodic_audit_check(self):
-        """VER-2: Периодическая проверка целостности"""
-        print("[Security] Running periodic audit check...")
-        if not hasattr(self, 'audit_logger'): return
+    def open_audit_viewer(self):
+        """Открытие окна просмотра журнала аудита (GUI-1)"""
+        if not self.auth_service.is_authenticated():
+            QMessageBox.warning(self, "Ошибка", "Сначала войдите в систему.")
+            return
 
-        from src.core.audit.log_verifier import LogVerifier
-        verifier = LogVerifier(self.db_helper, self.audit_logger.signer)
-        # Проверяем последние 1000 записей
-        results = verifier.verify_all(limit=1000)
-
-        if not results['verified']:
-            QMessageBox.critical(self, "Security Alert",
-                                 "Tampering detected during periodic check!")
+        from src.gui.audit_viewer import AuditViewer
+        viewer = AuditViewer(self.db_helper, self)
+        viewer.exec()
 
     def periodic_audit_check(self):
         print("[Security] Running periodic audit check...")
@@ -1286,3 +1284,11 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Security Alert", "Tampering detected during periodic check!")
             self.auth_service.logout()
 
+    def open_audit_viewer(self):
+        """Открытие окна просмотра журнала аудита (GUI-1)"""
+        if not self.auth_service.is_authenticated():
+            QMessageBox.warning(self, "Ошибка", "Сначала войдите в систему.")
+            return
+
+        viewer = AuditViewer(self.db_helper, self)
+        viewer.exec()
