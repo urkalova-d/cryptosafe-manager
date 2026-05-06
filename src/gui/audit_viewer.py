@@ -3,8 +3,13 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTableWidget,
                              QTableWidgetItem, QHeaderView, QPushButton, QLabel,
                              QComboBox, QLineEdit, QTextEdit, QWidget, QDateEdit,
                              QGroupBox, QMessageBox)
-from PyQt6.QtCore import Qt, QDate
+from PyQt6.QtCore import Qt, QDate, QDateTime
 from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import QFileDialog, QInputDialog, QApplication
+from src.core.audit.log_exporter import LogExporter
+from src.core.events import event_bus, EventType
+import os
+from datetime import datetime as py_datetime
 
 
 class AuditViewer(QDialog):
@@ -36,7 +41,7 @@ class AuditViewer(QDialog):
         filter_layout.addWidget(QLabel("Тип:"))
         self.filter_type = QComboBox()
         self.filter_type.addItem("Все", None)
-        self.filter_type.addItem("AUTH", "AUTH_LOGIN_SUCCESS")  # Пример, лучше загрузить из БД уникальные
+        self.filter_type.addItem("AUTH", "AUTH_LOGIN_SUCCESS")
         self.filter_type.addItem("VAULT", "VAULT_CREATE")
         self.filter_type.addItem("CLIPBOARD", "CLIPBOARD_COPY")
         self.filter_type.addItem("SYSTEM", "SYSTEM_GENESIS")
@@ -128,6 +133,28 @@ class AuditViewer(QDialog):
         footer_layout.addWidget(self.stats_label)
 
         main_layout.addLayout(footer_layout)
+
+        # === НОВОЕ: Кнопки экспорта ===
+        export_group = QGroupBox("Экспорт отчетов")
+        export_layout = QHBoxLayout(export_group)
+
+        btn_json = QPushButton("📄 JSON")
+        btn_json.setToolTip("Полный дамп с подписями")
+        btn_json.clicked.connect(lambda: self.start_export('json'))
+
+        btn_csv = QPushButton("📊 CSV")
+        btn_csv.setToolTip("Таблица для Excel")
+        btn_csv.clicked.connect(lambda: self.start_export('csv'))
+
+        btn_pdf = QPushButton("📕 PDF")
+        btn_pdf.setToolTip("Человекочитаемый отчет")
+        btn_pdf.clicked.connect(lambda: self.start_export('pdf'))
+
+        export_layout.addWidget(btn_json)
+        export_layout.addWidget(btn_csv)
+        export_layout.addWidget(btn_pdf)
+
+        main_layout.addWidget(export_group)
 
     def load_data(self):
         """Загрузка данных в таблицу с учетом фильтров."""
@@ -258,3 +285,114 @@ class AuditViewer(QDialog):
         if self.current_page > 1:
             self.current_page -= 1
             self.load_data()
+
+    def _get_current_filters(self):
+        """Собирает словарь фильтров из UI элементов."""
+        filters = {}
+
+        # 1. Тип события
+        event_type = self.filter_type.currentText()
+        if event_type != "Все":
+            filters['event_type_like'] = event_type + "%"
+
+        # 2. Важность
+        severity = self.filter_severity.currentText()
+        if severity != "Все":
+            filters['severity'] = severity
+
+        # 3. Даты
+        if self.date_from.date().isValid():
+            filters['start_date'] = self.date_from.date().toString("yyyy-MM-dd") + "T00:00:00"
+        if self.date_to.date().isValid():
+            filters['end_date'] = self.date_to.date().toString("yyyy-MM-dd") + "T23:59:59"
+
+        # 4. Поиск
+        search_text = self.search_input.text().strip()
+        if search_text:
+            filters['search_text_like'] = f"%{search_text}%"
+
+        return filters
+
+    def start_export(self, format_type: str):
+        """EXP-3: Запуск экспорта с проверкой пароля."""
+
+        # 1. Проверяем родительское окно
+        main_win = self.parent()
+        if not main_win or not hasattr(main_win, 'key_manager'):
+            QMessageBox.critical(self, "Ошибка", "Не удалось получить доступ к менеджеру ключей.")
+            return
+
+        # 2. Запрос пароля
+        try:
+            pwd, ok = QInputDialog.getText(self, "Подтверждение",
+                                           "Введите мастер-пароль для экспорта:",
+                                           QLineEdit.EchoMode.Password)
+            if not ok or not pwd:
+                return  # Отмена
+
+            stored_hash = self.db.get_setting("master_hash")
+
+            # 3. Верификация (может вызывать краш при конфликте библиотек)
+            # Используем auth_service если есть, иначе key_manager
+            # verify_password возвращает bool
+            is_valid = main_win.key_manager.verify_password(pwd, stored_hash)
+
+            if not is_valid:
+                QMessageBox.warning(self, "Ошибка", "Неверный мастер-пароль.")
+                return
+
+        except Exception as e:
+            QMessageBox.critical(self, "Критическая ошибка", f"Ошибка при проверке пароля: {e}")
+            print(f"[AuditViewer] Verification crash: {e}")
+            return
+
+        # 4. Выбор файла
+        filter_str = ""
+        if format_type == 'json':
+            filter_str = "JSON Files (*.json)"
+        elif format_type == 'csv':
+            filter_str = "CSV Files (*.csv)"
+        elif format_type == 'pdf':
+            filter_str = "PDF Files (*.pdf)"
+
+        default_name = f"audit_report_{QDateTime.currentDateTime().toString('yyyyMMdd')}.{format_type}"
+        file_path, _ = QFileDialog.getSaveFileName(self, "Сохранить отчет", default_name, filter_str)
+
+        if not file_path:
+            return
+
+        # 5. Получение данных
+        filters = self._get_current_filters()
+        # Загружаем ВСЕ строки (limit очень большой)
+        rows, _ = self.db.get_filtered_audit_logs(limit=100000, offset=0, filters=filters)
+
+        if not rows:
+            QMessageBox.information(self, "Информация", "Нет записей для экспорта по выбранным фильтрам.")
+            return
+
+        # 6. Выполнение экспорта
+        public_key = self.db.get_active_public_key() or ""
+        success = False
+        msg = ""
+
+        try:
+            if format_type == 'json':
+                success, msg = LogExporter.export_to_json(rows, public_key, file_path)
+            elif format_type == 'csv':
+                success, msg = LogExporter.export_to_csv(rows, file_path)
+            elif format_type == 'pdf':
+                success, msg = LogExporter.export_to_pdf(rows, file_path)
+
+            if success:
+                QMessageBox.information(self, "Успех", msg)
+                # Логируем операцию экспорта
+                event_bus.publish(EventType.SYSTEM_SETTINGS_CHANGED, {
+                    'action': 'export_logs',
+                    'format': format_type,
+                    'count': len(rows)
+                })
+            else:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось экспортировать: {msg}")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка экспорта", f"Произошла ошибка при записи файла: {e}")
+
