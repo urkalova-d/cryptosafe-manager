@@ -805,6 +805,11 @@ class MainWindow(QMainWindow):
 
         # загрузка данных  из менеджера
         entry_data = self.entry_manager.get_entry(entry_id)
+        from src.core.events import event_bus, EventType
+        event_bus.publish(EventType.VAULT_ENTRY_READ, {
+            'action': 'read',
+            'entry_id': entry_id
+        })
 
         # открытие окна добавления в режиме редактирования
         from src.gui.add_record_window import AddRecordWindow
@@ -840,6 +845,11 @@ class MainWindow(QMainWindow):
     def edit_entry_by_id(self, entry_id):
         #Слот для сигнала edit_requested из таблицы
         entry_data = self.entry_manager.get_entry(entry_id)
+        from src.core.events import event_bus, EventType
+        event_bus.publish(EventType.VAULT_ENTRY_READ, {
+            'action': 'read',
+            'entry_id': entry_id
+        })
 
         from src.gui.add_record_window import AddRecordWindow
         edit_win = AddRecordWindow(self.db_helper, self)

@@ -18,7 +18,6 @@ class EntryManager(QObject):
     EntryCreated = pyqtSignal(int)
     EntryUpdated = pyqtSignal(int)
     EntryDeleted = pyqtSignal(int)
-    # инткграция к 4 спринту
     EntryCopied = pyqtSignal(int)
 
     def __init__(self, db_helper, key_manager):
@@ -82,6 +81,13 @@ class EntryManager(QObject):
             decrypted_data['created_at'] = record['created_at']
             decrypted_data['updated_at'] = record['updated_at']
             decrypted_data['tags'] = record['tags']
+
+            #  Логирование чтения
+            from src.core.events import event_bus, EventType
+            event_bus.publish(EventType.VAULT_ENTRY_READ, {
+                'action': 'read',
+                'entry_id': entry_id
+            })
 
             return decrypted_data
         except Exception as e:
@@ -207,6 +213,16 @@ class EntryManager(QObject):
 
     def filter_entries(self, all_entries, query):
         #Продвинутая фильтрация (нечеткий поиск, поиск через: фильтрация по силе пароля
+        # === Публикация события поиска ===
+        if query:
+            # Анонимизация: логируем только длину и факт поиска, не сам текст
+            # Или можно логировать сам текст, если это не считается секретом (обычно поиск по сервисам не секретен)
+            # Для строгой безопасности логируем только сам факт поиска.
+            event_bus.publish(EventType.VAULT_SEARCH_PERFORMED, {
+                'action': 'search',
+                'query_length': len(query),
+                'has_filters': ":" in query
+            })
         if not query:
             return all_entries
 

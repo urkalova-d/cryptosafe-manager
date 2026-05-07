@@ -84,6 +84,8 @@ class AuditLogger:
         event_bus.subscribe(EventType.VAULT_ENTRY_CREATED, self.on_vault_event)
         event_bus.subscribe(EventType.VAULT_ENTRY_UPDATED, self.on_vault_event)
         event_bus.subscribe(EventType.VAULT_ENTRY_DELETED, self.on_vault_event)
+        event_bus.subscribe(EventType.VAULT_ENTRY_READ, self.on_vault_event)  # Добавлено
+        event_bus.subscribe(EventType.VAULT_SEARCH_PERFORMED, self.on_vault_event)  # Добавлено
 
         # Аутентификация
         event_bus.subscribe(EventType.AUTH_LOGIN_SUCCESS, self.on_auth_event)
@@ -93,6 +95,8 @@ class AuditLogger:
         # Буфер обмена
         event_bus.subscribe(EventType.CLIPBOARD_COPY, self.on_clipboard_event)
         event_bus.subscribe(EventType.CLIPBOARD_CLEARED, self.on_clipboard_event)
+        event_bus.subscribe(EventType.CLIPBOARD_EXTERNAL_CHANGE, self.on_security_event)  # Добавлено
+
 
     def _create_genesis_entry(self):
         """Создает первую запись в журнале (Start of Chain)."""
@@ -141,7 +145,8 @@ class AuditLogger:
             'create': ('VAULT_CREATE', 'INFO'),
             'update': ('VAULT_UPDATE', 'INFO'),
             'delete': ('VAULT_DELETE', 'WARN'),
-            'read': ('VAULT_READ', 'INFO')
+            'read': ('VAULT_READ', 'INFO'),
+            'search': ('VAULT_SEARCH_PERFORMED', 'INFO')
         }
         action = data.get('action', 'unknown')
         e_type, severity = event_type_map.get(action, ('VAULT_OP', 'INFO'))
@@ -183,16 +188,12 @@ class AuditLogger:
     def on_clipboard_event(self, data: dict):
         """Обработчик событий буфера обмена."""
         action = data.get('action', 'copy')
-
+        severity = 'WARN' if action == 'external_tamper' else 'INFO'
         self.log_event(
             event_type=f"CLIPBOARD_{action.upper()}",
-            severity='INFO',
+            severity=severity,
             source='clipboard_service',
-            details={
-                'entry_id': data.get('entry_id'),
-                'data_type': data.get('data_type', 'unknown'),
-                'auto_clear': data.get('auto_clear', False)
-            }
+            details=data  # Передаем весь словарь data
         )
 
     def _sanitize_details(self, details: Dict) -> Dict:
@@ -227,3 +228,14 @@ class AuditLogger:
 
         except Exception as e:
             print(f"[AuditLogger] Error writing entry: {e}")
+
+    def on_security_event(self, data: dict):
+        """Обработчик событий безопасности (Tampering, Policy Violations)"""
+        action = data.get('action', 'unknown')
+        self.log_event(
+            event_type=f"SECURITY_{action.upper()}",
+            severity='WARN',  # Такие события важны
+            source='clipboard_monitor',
+            details=data
+        )
+

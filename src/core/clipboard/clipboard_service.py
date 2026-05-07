@@ -450,8 +450,11 @@ class ClipboardService(QObject):
 
                 # Если содержимое НЕ совпадает -> кто-то извне перезаписал буфер
                 print("[ClipboardService] External change detected! Forcing cleanup.")
-                self._log_security_event("CLIPBOARD_TAMPER", self._current_entry_id, "External overwrite detected")
-
+                event_bus.publish(EventType.CLIPBOARD_EXTERNAL_CHANGE, {
+                    'action': 'external_tamper',
+                    'entry_id': self._current_entry_id,
+                    'reason': 'External overwrite detected'
+                })
                 self._clear_timer.stop()
                 self._cleanup_memory()
             except Exception:

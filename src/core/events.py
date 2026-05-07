@@ -14,11 +14,13 @@ class EventType(Enum):
     VAULT_ENTRY_UPDATED = auto()
     VAULT_ENTRY_DELETED = auto()
     VAULT_ENTRY_READ = auto()  # При просмотре/расшифровке
+    VAULT_SEARCH_PERFORMED = auto()  # Поиск
 
     #Буфер обмена
     CLIPBOARD_COPY = auto()  # Копирование данных
     CLIPBOARD_CLEARED = auto()  # Очистка буфера
     CLIPBOARD_TIMEOUT = auto()  # Авто-очистка по таймеру
+    CLIPBOARD_EXTERNAL_CHANGE = auto()
 
     # Система
     SYSTEM_STARTUP = auto()
