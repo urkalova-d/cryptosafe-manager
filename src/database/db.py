@@ -129,6 +129,10 @@ class DatabaseHelper:
                                 content_rowid=id
                             )
                         """)
+            cursor.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES (?, ?)",
+                           ("audit_retention_days", "365"))  # Хранить логи 1 год
+            cursor.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES (?, ?)",
+                           ("audit_max_entries", "10000"))
             # Триггеры для автоматического обновления поискового индекса
             cursor.execute("""
                             CREATE TRIGGER IF NOT EXISTS vault_ai AFTER INSERT ON vault_entries BEGIN
@@ -575,6 +579,75 @@ class DatabaseHelper:
             cursor = self.conn.execute("SELECT public_key FROM audit_public_keys WHERE is_active = 1 LIMIT 1")
             row = cursor.fetchone()
             return row[0] if row else None
+
+    def cleanup_old_audit_logs(self):
+        """Удаляет логи старше указанного количества дней или при превышении лимита."""
+        retention_days = int(self.get_setting("audit_retention_days") or 365)
+        max_entries = int(self.get_setting("audit_max_entries") or 10000)
+
+        with self._lock:
+            try:
+                # Удаляем по дате
+                self.conn.execute(f"""
+                    DELETE FROM audit_log 
+                    WHERE timestamp < datetime('now', '-{retention_days} days')
+                """)
+
+                # Если записей все еще слишком много, удаляем самые старые
+                cursor = self.conn.execute("SELECT COUNT(*) FROM audit_log")
+                count = cursor.fetchone()[0]
+
+                if count > max_entries:
+                    limit_to_delete = count - max_entries
+                    print(f"[DB] Audit log cleanup: removing {limit_to_delete} oldest entries.")
+                    # Находим ID записи, с которого нужно удалить
+                    cursor = self.conn.execute(f"""
+                        SELECT sequence_number FROM audit_log 
+                        ORDER BY sequence_number ASC 
+                        LIMIT 1 OFFSET {max_entries}
+                    """)
+                    row = cursor.fetchone()
+                    if row:
+                        threshold_id = row[0]
+                        # Так как у нас триггер на DELETE, его нужно временно отключить или обойти
+                        # Но так как триггер защищает от удаления, очистка должна быть привилегированной.
+                        # Самый простой способ - удалить триггер, очистить, создать триггер.
+                        # ИЛИ использовать флаг "hard_delete" в настройках (но это сложно).
+                        # ДЛЯ COMP-3: Рекомендуется отключать защиту для операции очистки.
+
+                        # Отключаем триггер
+                        self.conn.execute("DROP TRIGGER IF EXISTS prevent_audit_delete")
+
+                        self.conn.execute(f"DELETE FROM audit_log WHERE sequence_number < {threshold_id}")
+                        self.conn.commit()
+
+                        # Восстанавливаем триггер
+                        self.conn.execute("""
+                            CREATE TRIGGER IF NOT EXISTS prevent_audit_delete
+                            BEFORE DELETE ON audit_log
+                            FOR EACH ROW
+                            BEGIN
+                                SELECT RAISE(FAIL, 'SECURITY: Audit logs cannot be deleted.');
+                            END;
+                        """)
+                        self.conn.commit()
+
+                print("[DB] Audit log retention cleanup complete.")
+            except Exception as e:
+                print(f"[DB] Error during audit cleanup: {e}")
+                # Восстанавливаем триггер в случае ошибки
+                try:
+                    self.conn.execute("""
+                        CREATE TRIGGER IF NOT EXISTS prevent_audit_delete
+                        BEFORE DELETE ON audit_log
+                        FOR EACH ROW
+                        BEGIN
+                            SELECT RAISE(FAIL, 'SECURITY: Audit logs cannot be deleted.');
+                        END;
+                    """)
+                    self.conn.commit()
+                except:
+                    pass
 
 
 

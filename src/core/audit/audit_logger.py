@@ -239,3 +239,44 @@ class AuditLogger:
             details=data
         )
 
+    @staticmethod
+    def format_as_cef(entry: Dict[str, Any]) -> str:
+        """
+        Converts a log entry to Common Event Format (CEF) string.
+        CEF Header: CEF:Version|Device Vendor|Device Product|Device Version|Signature ID|Name|Severity|Extension
+        """
+        # Header constants
+        cef_version = "0"
+        device_vendor = "CryptoSafe"
+        device_product = "AuditSystem"
+        device_version = "1.0"
+
+        # Mapping fields
+        signature_id = entry.get('event_type', 'UNKNOWN')
+        name = entry.get('event_type', 'Audit Event')
+        severity = entry.get('severity', 'INFO')
+
+        # Extensions (Key=Value pairs)
+        extensions = []
+
+        # Standard CEF fields
+        extensions.append(f"rt={entry.get('timestamp', '')}")  # Receipt Time
+        extensions.append(f"suser={entry.get('user_id', '')}")  # Source User
+        extensions.append(f"src={entry.get('source', '')}")  # Source
+
+        # Custom fields from details
+        details = entry.get('details', {})
+        if isinstance(details, str):
+            try:
+                details = json.loads(details)
+            except:
+                details = {}
+
+        for k, v in details.items():
+            safe_val = str(v).replace('=', '\\=').replace('\\', '\\\\')
+            extensions.append(f"cs{k}={safe_val}")
+
+        extension_str = " ".join(extensions)
+
+        return f"CEF:{cef_version}|{device_vendor}|{device_product}|{device_version}|{signature_id}|{name}|{severity}|{extension_str}"
+
