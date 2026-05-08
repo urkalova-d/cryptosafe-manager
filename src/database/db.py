@@ -24,7 +24,7 @@ class DatabaseHelper:
             cursor = self.conn.cursor()
 
 
-            # Новая таблица аудита
+            # таблица аудита
             cursor.execute("""
                             CREATE TABLE IF NOT EXISTS audit_log (
                                 sequence_number INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,7 +50,7 @@ class DatabaseHelper:
                             )
                         """)
 
-            # === REQ DB-3: Индексы ===
+            # Индексы
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_event_type ON audit_log(event_type)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_sequence ON audit_log(sequence_number)")
@@ -474,7 +474,7 @@ class DatabaseHelper:
         self.conn.execute("DELETE FROM deleted_entries WHERE expiration_timestamp <= datetime('now')")
 
     def add_audit_entry(self, entry_data: dict, signature_hex: str, entry_hash: str, prev_hash: str):
-        """Добавляет подписанную запись в журнал аудита."""
+        #Добавляет подписанную запись в журнал аудита
         with self._lock:
             self.conn.execute("""
                 INSERT INTO audit_log 
@@ -494,7 +494,7 @@ class DatabaseHelper:
             self.conn.commit()
 
     def get_last_audit_entry(self):
-        """Получает последнюю запись для построения цепочки."""
+        #Получает последнюю запись для построения цепочки
         with self._lock:
             cursor = self.conn.execute("""
                 SELECT sequence_number, entry_hash 
@@ -504,7 +504,7 @@ class DatabaseHelper:
             return cursor.fetchone()
 
     def get_audit_entries(self, limit=100, offset=0):
-        """Получает список записей с пагинацией."""
+        #Получает список записей с пагинацией
         with self._lock:
             cursor = self.conn.execute("""
                 SELECT sequence_number, timestamp, event_type, severity, source, user_id, details, signature
@@ -515,26 +515,23 @@ class DatabaseHelper:
             return cursor.fetchall()
 
     def get_filtered_audit_logs(self, limit: int, offset: int, filters: dict = None):
-        """
-        Получает отфильтрованные логи с пагинацией.
-        Возвращает (список записей, общее количество записей).
-        """
+        #Получает отфильтрованные логи
         with self._lock:
             base_query = "FROM audit_log WHERE 1=1"
             params = []
 
             if filters:
-                # Фильтр по типу (начинается с...)
+                # фильтр по типу (начинается с...)
                 if filters.get('event_type_like'):
                     base_query += " AND event_type LIKE ?"
                     params.append(filters['event_type_like'])
 
-                # Фильтр по важности
+                #фильтр по важности
                 if filters.get('severity'):
                     base_query += " AND severity = ?"
                     params.append(filters['severity'])
 
-                # Фильтр по дате (строго ISO формат)
+                #фильтр по дате
                 if filters.get('start_date'):
                     base_query += " AND timestamp >= ?"
                     params.append(filters['start_date'])
@@ -546,7 +543,6 @@ class DatabaseHelper:
                 if filters.get('search_text_like'):
                     base_query += " AND (event_type LIKE ? OR severity LIKE ? OR timestamp LIKE ? OR details LIKE ?)"
                     search_param = filters['search_text_like']
-                    # Добавляем параметр 4 раза для каждого OR условия
                     params.extend([search_param, search_param, search_param, search_param])
 
             # Запрос общего количества
@@ -554,7 +550,7 @@ class DatabaseHelper:
             cursor = self.conn.execute(count_query, params)
             total_count = cursor.fetchone()[0]
 
-            # Запрос данных с пагинацией
+            # Запрос данных с навигацией
             data_query = f"SELECT * {base_query} ORDER BY sequence_number DESC LIMIT ? OFFSET ?"
             params.extend([limit, offset])
 
@@ -564,7 +560,7 @@ class DatabaseHelper:
             return rows, total_count
 
     def save_audit_public_key(self, public_key_hex: str):
-        """Сохраняет публичный ключ верификации."""
+        #Сохраняет публичный ключ верификации
         with self._lock:
             # Деактивируем старые ключи
             self.conn.execute("UPDATE audit_public_keys SET is_active = 0")
@@ -581,7 +577,7 @@ class DatabaseHelper:
             return row[0] if row else None
 
     def cleanup_old_audit_logs(self):
-        """Удаляет логи старше указанного количества дней или при превышении лимита."""
+        #Удаляет логи старше указанного количества дней или при превышении лимита
         retention_days = int(self.get_setting("audit_retention_days") or 365)
         max_entries = int(self.get_setting("audit_max_entries") or 10000)
 
@@ -609,11 +605,6 @@ class DatabaseHelper:
                     row = cursor.fetchone()
                     if row:
                         threshold_id = row[0]
-                        # Так как у нас триггер на DELETE, его нужно временно отключить или обойти
-                        # Но так как триггер защищает от удаления, очистка должна быть привилегированной.
-                        # Самый простой способ - удалить триггер, очистить, создать триггер.
-                        # ИЛИ использовать флаг "hard_delete" в настройках (но это сложно).
-                        # ДЛЯ COMP-3: Рекомендуется отключать защиту для операции очистки.
 
                         # Отключаем триггер
                         self.conn.execute("DROP TRIGGER IF EXISTS prevent_audit_delete")

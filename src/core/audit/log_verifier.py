@@ -4,20 +4,15 @@ import hashlib
 
 
 class LogVerifier:
-    """
-    Отвечает за проверку целостности журнала аудита.
-    Требования: VER-1, VER-3
-    """
+    #Отвечает за проверку целостности журнала аудита
 
     def __init__(self, db_helper, signer):
         self.db = db_helper
         self.signer = signer
 
     def verify_all(self, limit: int = None) -> Dict[str, Any]:
-        """
-        Полная проверка целостности журнала.
-        Возвращает словарь с результатами.
-        """
+        #Полная проверка целостности журнала
+
         results = {
             'verified': True,
             'total_checked': 0,
@@ -35,7 +30,6 @@ class LogVerifier:
 
             for row in rows:
                 # Распаковка (порядок как в SELECT запросе)
-                # 0:seq, 1:time, 2:type, 3:sev, 4:src, 5:user, 6:details, 7:sig, 8:hash, 9:prev_hash
                 seq_num = row[0]
                 timestamp = row[1]
                 event_type = row[2]
@@ -49,8 +43,7 @@ class LogVerifier:
 
                 results['total_checked'] += 1
 
-                # === 1. Восстанавливаем структуру данных для хеширования ===
-                # Важно: структура должна совпадать с audit_logger._write_entry
+                #Восстанавливаем структуру данных для хеширования
                 entry_data_reconstructed = {
                     'timestamp': timestamp,
                     'event_type': event_type,
@@ -61,14 +54,9 @@ class LogVerifier:
                     'previous_hash': prev_hash_db
                 }
 
-                # Сериализация (точно так же, как при записи: sort_keys=True)
-                # Но details внутри может быть строкой или dict.
-                # В audit_logger мы делали json.dumps(details_dict). Тут details_json - это строка.
-                # Чтобы совпало, нужно загрузить строку в dict, а потом опять сдампить.
-
                 reconstructed_json = json.dumps(entry_data_reconstructed, sort_keys=True)
 
-                # === 2. Проверка Хеша данных (Data Integrity) ===
+                # Проверка Хеша данных
                 computed_hash = hashlib.sha256(reconstructed_json.encode('utf-8')).hexdigest()
 
                 if computed_hash != stored_hash:
@@ -78,7 +66,7 @@ class LogVerifier:
                         'reason': 'Hash mismatch! Data tampered.'
                     })
 
-                # === 3. Проверка Цепочки (Chain Integrity) ===
+                #  Проверка Цепочки
                 if prev_hash_db != previous_hash:
                     results['verified'] = False
                     results['chain_breaks'].append({
@@ -87,9 +75,7 @@ class LogVerifier:
                         'found': prev_hash_db
                     })
 
-                # === 4. Проверка Подписи (Signature Integrity) ===
-                # Это тяжело сделать без публичного ключа, если signer не инициализирован.
-                # Но мы можем попробовать проверить, если signer активен.
+                #  Проверка Подписи
                 try:
                     # Для проверки подписи нужны байты именно того, что подписывали (entry_json)
                     # В audit_logger мы подписывали entry_json.

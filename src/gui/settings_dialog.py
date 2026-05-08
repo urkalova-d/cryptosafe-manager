@@ -34,7 +34,7 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
 
-        # === 1. Профиль безопасности (Clipboard) ===
+        #профиль безопасности
         profile_group = QGroupBox("Профиль безопасности (Буфер обмена)")
         profile_layout = QGridLayout(profile_group)
 
@@ -63,7 +63,7 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(profile_group)
 
-        # === 2. Политика хранения (COMP-3) ===
+        #  Политика хранения
         retention_group = QGroupBox("Политика хранения журнала аудита")
         retention_layout = QGridLayout(retention_group)
 
@@ -85,14 +85,14 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(retention_group)
 
-        # === 3. Дополнительная защита ===
+        #доп защита
         adv_group = QGroupBox("Дополнительная защита")
         adv_layout = QVBoxLayout(adv_group)
         self.anti_screenshot_check = QCheckBox("Защита от скриншотов (Windows)")
         adv_layout.addWidget(self.anti_screenshot_check)
         layout.addWidget(adv_group)
 
-        # Кнопки
+        #кнопочки
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 

@@ -13,9 +13,7 @@ from datetime import datetime as py_datetime
 
 
 class AuditViewer(QDialog):
-    """
-    GUI-1: Audit Log Viewer with filtering and pagination.
-    """
+    # Audit Log Viewer with filtering and pagination
 
     def __init__(self, db_helper, parent=None):
         super().__init__(parent)
@@ -33,11 +31,11 @@ class AuditViewer(QDialog):
     def init_ui(self):
         main_layout = QVBoxLayout(self)
 
-        # === Верхняя панель: Фильтры (GUI-1) ===
+        #фильтры
         filter_group = QGroupBox("Фильтры")
         filter_layout = QHBoxLayout(filter_group)
 
-        # Тип события
+        #тип события
         filter_layout.addWidget(QLabel("Тип:"))
         self.filter_type = QComboBox()
         self.filter_type.addItem("Все", None)
@@ -47,13 +45,13 @@ class AuditViewer(QDialog):
         self.filter_type.addItem("SYSTEM", "SYSTEM_GENESIS")
         filter_layout.addWidget(self.filter_type)
 
-        # Критичность
+        #важность
         filter_layout.addWidget(QLabel("Важность:"))
         self.filter_severity = QComboBox()
         self.filter_severity.addItems(["Все", "INFO", "WARN", "ERROR", "CRITICAL"])
         filter_layout.addWidget(self.filter_severity)
 
-        # Дата
+        #дата
         filter_layout.addWidget(QLabel("От:"))
         self.date_from = QDateEdit()
         self.date_from.setCalendarPopup(True)
@@ -66,13 +64,13 @@ class AuditViewer(QDialog):
         self.date_to.setDate(QDate.currentDate())
         filter_layout.addWidget(self.date_to)
 
-        # Поиск
+        #поиск
         filter_layout.addWidget(QLabel("Поиск:"))
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Текст в деталях...")
         filter_layout.addWidget(self.search_input)
 
-        # Кнопки
+        #кнопки
         apply_btn = QPushButton("Применить")
         apply_btn.clicked.connect(self.apply_filters)
         filter_layout.addWidget(apply_btn)
@@ -83,10 +81,10 @@ class AuditViewer(QDialog):
 
         main_layout.addWidget(filter_group)
 
-        # === Центральная часть: Таблица и Детали ===
+        #таблица и детали
         content_layout = QHBoxLayout()
 
-        # Таблица (GUI-1)
+        # Таблица
         self.table = QTableWidget()
         self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels(["Время", "Событие", "Важность", "Пользователь", "Источник", "ID Записи"])
@@ -98,7 +96,7 @@ class AuditViewer(QDialog):
 
         content_layout.addWidget(self.table, 3)
 
-        # Панель деталей (GUI-2)
+        # Панель деталей
         details_group = QGroupBox("Детали записи")
         details_layout = QVBoxLayout(details_group)
 
@@ -111,10 +109,10 @@ class AuditViewer(QDialog):
 
         main_layout.addLayout(content_layout)
 
-        # === Нижняя панель: Пагинация и Статистика (GUI-1, GUI-3) ===
+        # управление и статистика
         footer_layout = QHBoxLayout()
 
-        # Пагинация
+        #управление
         self.btn_prev = QPushButton("◀ Назад")
         self.btn_prev.clicked.connect(self.prev_page)
         self.btn_next = QPushButton("Вперед ▶")
@@ -128,13 +126,13 @@ class AuditViewer(QDialog):
 
         footer_layout.addStretch()
 
-        # Статистика (GUI-3)
+        #статистика
         self.stats_label = QLabel("Всего записей: 0")
         footer_layout.addWidget(self.stats_label)
 
         main_layout.addLayout(footer_layout)
 
-        # === НОВОЕ: Кнопки экспорта ===
+        #кнопки экспорта
         export_group = QGroupBox("Экспорт отчетов")
         export_layout = QHBoxLayout(export_group)
 
@@ -157,38 +155,35 @@ class AuditViewer(QDialog):
         main_layout.addWidget(export_group)
 
     def load_data(self):
-        """Загрузка данных в таблицу с учетом фильтров."""
+        #загрузка данных в таблицу с учетом фильтров
         offset = (self.current_page - 1) * self.page_size
 
         # Сбор фильтров
         filters = {}
 
-        # 1. Фильтр по типу события (используем LIKE, так как типы имеют приставки VAULT_, AUTH_ и т.д.)
+        #фильтр по типу события
         event_type = self.filter_type.currentText()
         if event_type != "Все":
-            # Если выбрали AUTH, ищем все события, начинающиеся с AUTH
             filters['event_type_like'] = event_type + "%"
-
-            # 2. Фильтр по важности
+            #фильтр по важности
         severity = self.filter_severity.currentText()
         if severity != "Все":
             filters['severity'] = severity
 
-        # 3. Даты
+        #даты
         if self.date_from.date().isValid():
             filters['start_date'] = self.date_from.date().toString("yyyy-MM-dd") + "T00:00:00"
         if self.date_to.date().isValid():
             filters['end_date'] = self.date_to.date().toString("yyyy-MM-dd") + "T23:59:59"
 
-        # 4. Поиск
+        #поиск
         search_text = self.search_input.text().strip()
         if search_text:
-            # Добавляем % по краям, чтобы искать вхождение
             filters['search_text_like'] = f"%{search_text}%"
 
         rows, total_count = self.db.get_filtered_audit_logs(self.page_size, offset, filters)
 
-        # Обновление таблицы
+        # обновление таблицы
         self.table.setRowCount(len(rows))
         for i, row in enumerate(rows):
             # row is a sqlite3.Row object
@@ -198,7 +193,7 @@ class AuditViewer(QDialog):
             self.table.setItem(i, 0, QTableWidgetItem(str(row_dict.get('timestamp', ''))))
             self.table.setItem(i, 1, QTableWidgetItem(str(row_dict.get('event_type', ''))))
 
-            # Цветовое кодирование важности
+            #цветовое кодирование важности
             sev = str(row_dict.get('severity', 'INFO'))
             severity_item = QTableWidgetItem(sev)
             if sev == 'WARN':
@@ -237,7 +232,7 @@ class AuditViewer(QDialog):
         self.btn_next.setEnabled(self.current_page < self.total_pages)
 
     def show_details(self, item):
-        """GUI-2: Показ деталей выбранной записи."""
+        #Показ деталей выбранной записи
         # Получаем строку
         row = item.row()
         # Достаем сохраненные данные из первой колонки
@@ -247,14 +242,14 @@ class AuditViewer(QDialog):
         row_data = data_item.data(Qt.ItemDataRole.UserRole)
         if not row_data: return
 
-        # Формируем красивый отчет
+        # Формируем отчет
         report = f"<b>Время:</b> {row_data['timestamp']}<br>"
         report += f"<b>Событие:</b> {row_data['event_type']}<br>"
         report += f"<b>Источник:</b> {row_data['source']}<br>"
         report += f"<b>Хеш записи:</b> <span style='font-family: monospace; font-size: 10px;'>{row_data['entry_hash'][:16]}...</span><br>"
         report += "<hr>"
 
-        # JSON Details
+        # JSON
         try:
             details_json = json.loads(row_data['details'])
             formatted_json = json.dumps(details_json, indent=4, ensure_ascii=False)
@@ -287,26 +282,26 @@ class AuditViewer(QDialog):
             self.load_data()
 
     def _get_current_filters(self):
-        """Собирает словарь фильтров из UI элементов."""
+        #Собирает словарь фильтров из UI элементов
         filters = {}
 
-        # 1. Тип события
+        #тип события
         event_type = self.filter_type.currentText()
         if event_type != "Все":
             filters['event_type_like'] = event_type + "%"
 
-        # 2. Важность
+        #важность
         severity = self.filter_severity.currentText()
         if severity != "Все":
             filters['severity'] = severity
 
-        # 3. Даты
+        #даты
         if self.date_from.date().isValid():
             filters['start_date'] = self.date_from.date().toString("yyyy-MM-dd") + "T00:00:00"
         if self.date_to.date().isValid():
             filters['end_date'] = self.date_to.date().toString("yyyy-MM-dd") + "T23:59:59"
 
-        # 4. Поиск
+        #поиск
         search_text = self.search_input.text().strip()
         if search_text:
             filters['search_text_like'] = f"%{search_text}%"
@@ -314,15 +309,15 @@ class AuditViewer(QDialog):
         return filters
 
     def start_export(self, format_type: str):
-        """EXP-3: Запуск экспорта с проверкой пароля."""
+        # Запуск экспорта с проверкой пароля
 
-        # 1. Проверяем родительское окно
+        # проверка родительского окна
         main_win = self.parent()
         if not main_win or not hasattr(main_win, 'key_manager'):
             QMessageBox.critical(self, "Ошибка", "Не удалось получить доступ к менеджеру ключей.")
             return
 
-        # 2. Запрос пароля
+        # запрос пароля
         try:
             pwd, ok = QInputDialog.getText(self, "Подтверждение",
                                            "Введите мастер-пароль для экспорта:",
@@ -332,9 +327,7 @@ class AuditViewer(QDialog):
 
             stored_hash = self.db.get_setting("master_hash")
 
-            # 3. Верификация (может вызывать краш при конфликте библиотек)
-            # Используем auth_service если есть, иначе key_manager
-            # verify_password возвращает bool
+            # Верификация
             is_valid = main_win.key_manager.verify_password(pwd, stored_hash)
 
             if not is_valid:
@@ -346,7 +339,7 @@ class AuditViewer(QDialog):
             print(f"[AuditViewer] Verification crash: {e}")
             return
 
-        # 4. Выбор файла
+        # Выбор файла
         filter_str = ""
         if format_type == 'json':
             filter_str = "JSON Files (*.json)"
@@ -361,7 +354,7 @@ class AuditViewer(QDialog):
         if not file_path:
             return
 
-        # 5. Получение данных
+        #Получение данных
         filters = self._get_current_filters()
         # Загружаем ВСЕ строки (limit очень большой)
         rows, _ = self.db.get_filtered_audit_logs(limit=100000, offset=0, filters=filters)
@@ -370,7 +363,7 @@ class AuditViewer(QDialog):
             QMessageBox.information(self, "Информация", "Нет записей для экспорта по выбранным фильтрам.")
             return
 
-        # 6. Выполнение экспорта
+        #Выполнение экспорта
         public_key = self.db.get_active_public_key() or ""
         success = False
         msg = ""

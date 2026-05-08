@@ -188,7 +188,7 @@ class MainWindow(QMainWindow):
             self.audit_logger = AuditLogger(self.db_helper, signer)
             self.audit_logger.start()
 
-            # === VER-1: Startup Verification ===
+            # Startup Verification
             print("[MainWindow] Verifying audit log integrity...")
             verifier = LogVerifier(self.db_helper, signer)
             verification_result = verifier.verify_all()
@@ -204,11 +204,22 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Security Alert",
                                      "CRITICAL: Audit log tampering detected! The database may be compromised.")
 
-            # === VER-2: Periodic Verification (СЮДА ВСТАВЛЯТЬ) ===
+            #  Periodic Verification
             self.periodic_verify_timer = QTimer(self)
             self.periodic_verify_timer.timeout.connect(self.periodic_audit_check)
-            # Запуск раз в 24 часа (для теста можно поставить 60000 = 1 минута)
+            # Запуск раз в 24 часа
             self.periodic_verify_timer.start(24 * 60 * 60 * 1000)
+
+            sample_entry = {
+                'timestamp': '2026-05-07T12:00:00Z',
+                'event_type': 'VAULT_READ',
+                'severity': 'INFO',
+                'source': 'vault_manager',
+                'user_id': 'admin',
+                'details': {'entry_id': 1}
+            }
+            cef_log = AuditLogger.format_as_cef(sample_entry)
+            print(f"[CEF FORMAT]: {cef_log}")
 
         except Exception as e:
             print(f"[MainWindow] CRITICAL: Failed to start Audit Logger: {e}")
@@ -271,7 +282,7 @@ class MainWindow(QMainWindow):
         view_menu = menubar.addMenu("Просмотр")
         verify_action = view_menu.addAction("🛡️ Проверить целостность логов")
         verify_action.triggered.connect(self.manual_verify_audit_logs)
-        logs_action = view_menu.addAction("📜 Журналы аудита")  # ИЗМЕНЕНО
+        logs_action = view_menu.addAction("📜 Журналы аудита")
         logs_action.triggered.connect(self.open_audit_viewer)
         settings_action = view_menu.addAction("⚙️ Настройки")
         settings_action.triggered.connect(self.open_settings_dialog)
@@ -322,7 +333,6 @@ class MainWindow(QMainWindow):
         self.search_bar.setFixedWidth(200)
         self.search_bar.textChanged.connect(self.run_search)
         toolbar.addWidget(self.search_bar)
-
 
     def _on_ephemeral_action_toggled(self, checked):
          #Обработчик кнопки эфемерного режима в тулбаре.
@@ -973,6 +983,7 @@ class MainWindow(QMainWindow):
             # синхронизация кнопки
             if hasattr(self, 'ephemeral_action') and self.ephemeral_action.isChecked():
                 self.ephemeral_action.setChecked(False)
+
     def _create_ephemeral_indicator(self):
         #индикатор эфемерного режима
         toolbar = None
@@ -1169,7 +1180,6 @@ class MainWindow(QMainWindow):
             self.clipboard_preview.setText("Буфер: пусто")
             self.clipboard_preview.setStyleSheet("color: #888; padding: 0 10px;")
 
-
     def enable_anti_screenshot(self):
         # антискриншот
         # print("[MainWindow] Enabling Anti-Screenshot protection...")
@@ -1265,14 +1275,14 @@ class MainWindow(QMainWindow):
             if results['chain_breaks']:
                 report += f"Разрывы цепочки: {len(results['chain_breaks'])}\n"
 
-            # VER-4: Уведомление и реакция
+            #  Уведомление и реакция
             QMessageBox.critical(self, "Security Alert!", report)
 
-            # Опционально: Блокировка хранилища
+            #  Блокировка хранилища
             # self.auth_service.logout()
 
     def open_audit_viewer(self):
-        """Открытие окна просмотра журнала аудита (GUI-1)"""
+        #Открытие окна просмотра журнала аудита
         if not self.auth_service.is_authenticated():
             QMessageBox.warning(self, "Ошибка", "Сначала войдите в систему.")
             return
@@ -1294,11 +1304,4 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Security Alert", "Tampering detected during periodic check!")
             self.auth_service.logout()
 
-    def open_audit_viewer(self):
-        """Открытие окна просмотра журнала аудита (GUI-1)"""
-        if not self.auth_service.is_authenticated():
-            QMessageBox.warning(self, "Ошибка", "Сначала войдите в систему.")
-            return
 
-        viewer = AuditViewer(self.db_helper, self)
-        viewer.exec()

@@ -3,22 +3,21 @@ import csv
 from datetime import datetime
 from PyQt6.QtGui import QTextDocument
 from PyQt6.QtPrintSupport import QPrinter
-
+from datetime import datetime, timezone
 
 class LogExporter:
     @staticmethod
     def export_to_json(rows: list, public_key_hex: str, file_path: str):
-        """
-        EXP-1, EXP-2: Экспорт в подписанный JSON.
-        """
+        #Экспорт в подписанный JSON
+
         export_data = {
             "metadata": {
-                "exported_at": datetime.utcnow().isoformat() + "Z",
+                "exported_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "tool": "CryptoSafe Manager",
                 "total_entries": len(rows)
             },
             "public_key": public_key_hex,
-            "log_entries": [dict(row) for row in rows]  # Конвертируем Row objects в dict
+            "log_entries": [dict(row) for row in rows]
         }
 
         try:
@@ -30,14 +29,13 @@ class LogExporter:
 
     @staticmethod
     def export_to_csv(rows: list, file_path: str):
-        """
-        EXP-1: Экспорт в CSV для аналитики.
-        """
+        # Экспорт в CSV для аналитики
+
         if not rows:
             return False, "Нет данных для экспорта."
 
         try:
-            # Берем ключи из первой строки для заголовков
+            #ключи из первой строки для заголовков
             headers = rows[0].keys()
 
             with open(file_path, 'w', newline='', encoding='utf-8-sig') as f:  # utf-8-sig для Excel
@@ -51,9 +49,8 @@ class LogExporter:
 
     @staticmethod
     def export_to_pdf(rows: list, file_path: str):
-        """
-        EXP-1: Экспорт в PDF (человеко-читаемый отчет).
-        """
+        #экспорт в PDF
+
         try:
             document = QTextDocument()
             html = "<h1> CryptoSafe Audit Log Report </h1>"
@@ -75,7 +72,6 @@ class LogExporter:
                 html += f"<td>{d.get('timestamp', '')}</td>"
                 html += f"<td>{d.get('event_type', '')}</td>"
                 html += f"<td>{d.get('severity', '')}</td>"
-                # Обрезаем details для PDF
                 details = str(d.get('details', ''))[:50] + "..."
                 html += f"<td><pre>{details}</pre></td>"
                 html += "</tr>"

@@ -1,0 +1,190 @@
+{
+    "metadata": {
+        "exported_at": "2026-05-06T20:48:54.486821Z",
+        "tool": "CryptoSafe Manager",
+        "total_entries": 15
+    },
+    "public_key": "254564d44b4ee95fa8a37b921596997a0f8b6d8830f6f3c36ba14adaaa8842b5",
+    "log_entries": [
+        {
+            "sequence_number": 15,
+            "timestamp": "2026-05-06T20:48:35.130282Z",
+            "event_type": "AUTH_UNKNOWN",
+            "severity": "INFO",
+            "source": "auth_service",
+            "user_id": "default",
+            "details": "{\"user_id\": \"default\", \"reason\": null}",
+            "previous_hash": "ecb19f18b24d5ec09eae8764645b91d613b3e77cf305b9dd110ef546edc8cabe",
+            "entry_hash": "8b51c0857b4da5aeae14c779109b6bb47685a81ea714d053831aa96f6c262710",
+            "signature": "2219e997206203f31e19ea0d4c7bf32e7c3e45ee144da1ebab5569acf17c82e66918fe562d037674df3f4e2f4c11e9f2d0c1c7ef211f1e164c2c262ff9d45b0b"
+        },
+        {
+            "sequence_number": 14,
+            "timestamp": "2026-05-06T20:32:48.599697Z",
+            "event_type": "AUTH_UNKNOWN",
+            "severity": "INFO",
+            "source": "auth_service",
+            "user_id": "default",
+            "details": "{\"user_id\": \"default\", \"reason\": null}",
+            "previous_hash": "1430cc902a0d04e83231e35d26ec0933f0f7ea632d81885915db4c0a6c3a19c2",
+            "entry_hash": "ecb19f18b24d5ec09eae8764645b91d613b3e77cf305b9dd110ef546edc8cabe",
+            "signature": "7f67c8a6fab0bd9c9380aa3d5eac46892925978df75e793868448081f09044ccb56e701eb1ef78aa8b9aa390628a4fc496f622b3b2a2126350aadd9992af0607"
+        },
+        {
+            "sequence_number": 13,
+            "timestamp": "2026-05-06T20:25:16.464992Z",
+            "event_type": "AUTH_UNKNOWN",
+            "severity": "INFO",
+            "source": "auth_service",
+            "user_id": "default",
+            "details": "{\"user_id\": \"default\", \"reason\": null}",
+            "previous_hash": "9f3bb57a3c86341426391a1bc50cc4bf8ec613aa1a2457a2df38acbc6cce3876",
+            "entry_hash": "1430cc902a0d04e83231e35d26ec0933f0f7ea632d81885915db4c0a6c3a19c2",
+            "signature": "daaff3ff515b642a7a259d956d86ba1270dcbc7e62cc923d3e851b8a6f83b19a23c02f2fb0906ad5f7352479c64515b6e053afab94b00027b6b78f938c206c06"
+        },
+        {
+            "sequence_number": 12,
+            "timestamp": "2026-05-06T20:06:57.711130Z",
+            "event_type": "AUTH_UNKNOWN",
+            "severity": "INFO",
+            "source": "auth_service",
+            "user_id": "default",
+            "details": "{\"user_id\": \"default\", \"reason\": null}",
+            "previous_hash": "89f2e722d599917a3840c04260e0e3d1652a03ea8568384744c69ed13b8613d5",
+            "entry_hash": "9f3bb57a3c86341426391a1bc50cc4bf8ec613aa1a2457a2df38acbc6cce3876",
+            "signature": "38418deb858d6e5e916c1bb19c2a1e4030e45a9ed7293fbe2d8c93d855437809b8e3c37aed947f1bfaf7bd173e8a5fdf338c2b753bb1550c6b26ad50f66db409"
+        },
+        {
+            "sequence_number": 11,
+            "timestamp": "2026-05-06T20:02:44.355171Z",
+            "event_type": "AUTH_UNKNOWN",
+            "severity": "INFO",
+            "source": "auth_service",
+            "user_id": "default",
+            "details": "{\"user_id\": \"default\", \"reason\": null}",
+            "previous_hash": "8dab5bca1294deff5c752775561ef4105295192105120b1c92e364ed917f5fec",
+            "entry_hash": "89f2e722d599917a3840c04260e0e3d1652a03ea8568384744c69ed13b8613d5",
+            "signature": "74c0fc9dbae147473f4c2a7e1261ab4eacafdf5e200c07cf72e20f4999bb84651f86e701d0d532810d055012a15825f4b78f54a0a4287078467dd268b79c2f06"
+        },
+        {
+            "sequence_number": 10,
+            "timestamp": "2026-05-06T19:56:42.813907Z",
+            "event_type": "AUTH_UNKNOWN",
+            "severity": "INFO",
+            "source": "auth_service",
+            "user_id": "default",
+            "details": "{\"user_id\": \"default\", \"reason\": null}",
+            "previous_hash": "19bfa22108156d39568f5a6aba93458efe15c3463e457ee26f6582e36600c34d",
+            "entry_hash": "8dab5bca1294deff5c752775561ef4105295192105120b1c92e364ed917f5fec",
+            "signature": "4598fad76d3e6f37d64cc0dc51936c602e2350cbf08d30cd770bd3ae0c735fea2adcf6212f632a4eced2ba9cd3c943671f4b62f77241764e65ce34af61182a0b"
+        },
+        {
+            "sequence_number": 9,
+            "timestamp": "2026-05-06T19:46:21.737384Z",
+            "event_type": "CLIPBOARD_COPY",
+            "severity": "INFO",
+            "source": "clipboard_service",
+            "user_id": "default",
+            "details": "{\"entry_id\": 1, \"data_type\": \"password\", \"auto_clear\": false}",
+            "previous_hash": "99a1f35b2fa57292a36ce24768187e1a14b5c0631aa60dfb3cbedee2b90ada5a",
+            "entry_hash": "19bfa22108156d39568f5a6aba93458efe15c3463e457ee26f6582e36600c34d",
+            "signature": "0add129ea5320f9a3b75cca7b7c097c161c86a0f9ca648e80690641d7ccb4c0d438cfa04cbf6710c76d4ced26c08891635a5564575bd13998b20493079d32e0d"
+        },
+        {
+            "sequence_number": 8,
+            "timestamp": "2026-05-06T19:46:19.884656Z",
+            "event_type": "AUTH_UNKNOWN",
+            "severity": "INFO",
+            "source": "auth_service",
+            "user_id": "default",
+            "details": "{\"user_id\": \"default\", \"reason\": null}",
+            "previous_hash": "3668e54b4616e42712456941bb17940e4a2ea960abde23f38552714181ee6c46",
+            "entry_hash": "99a1f35b2fa57292a36ce24768187e1a14b5c0631aa60dfb3cbedee2b90ada5a",
+            "signature": "6d07e701cec18c7c72b150e5fc4b5a7e02f707085fda1dc9bd9f5d23681905adf80a7669a71a4eef9026807b4d5832ca153fddb4de2e665ca42bbd6361229105"
+        },
+        {
+            "sequence_number": 7,
+            "timestamp": "2026-05-06T19:43:38.593610Z",
+            "event_type": "CLIPBOARD_CLEAR",
+            "severity": "INFO",
+            "source": "clipboard_service",
+            "user_id": "default",
+            "details": "{\"entry_id\": 2, \"data_type\": \"unknown\", \"auto_clear\": false}",
+            "previous_hash": "6000c021af20b19be33311d70d40a8dadde4482dc31127375d6b51ef517b6be6",
+            "entry_hash": "3668e54b4616e42712456941bb17940e4a2ea960abde23f38552714181ee6c46",
+            "signature": "20255a5f5c6b46e850843c355d3d27d6f3d7daaddbcdd04cccf5abb9607c9e52ca8fcfbfd72c62d4adb6995cb73ae4f95b316bc8292032dfdef35d258bd0a301"
+        },
+        {
+            "sequence_number": 6,
+            "timestamp": "2026-05-06T19:43:08.558194Z",
+            "event_type": "CLIPBOARD_COPY",
+            "severity": "INFO",
+            "source": "clipboard_service",
+            "user_id": "default",
+            "details": "{\"entry_id\": 2, \"data_type\": \"all\", \"auto_clear\": false}",
+            "previous_hash": "c7be20ea7b1fcaed03828665cf349c193a464319bee18230acd0af6d18324265",
+            "entry_hash": "6000c021af20b19be33311d70d40a8dadde4482dc31127375d6b51ef517b6be6",
+            "signature": "9b9ce0d1b3301b9e095940981eb57804758ac2778721e82fd1b939ee6dbb609258d42e6bfd28fc8dc9b35dbdd42f47efcd1cf318d3f3650ff91bf5876baf4c07"
+        },
+        {
+            "sequence_number": 5,
+            "timestamp": "2026-05-06T19:43:06.040361Z",
+            "event_type": "CLIPBOARD_COPY",
+            "severity": "INFO",
+            "source": "clipboard_service",
+            "user_id": "default",
+            "details": "{\"entry_id\": 2, \"data_type\": \"username\", \"auto_clear\": false}",
+            "previous_hash": "b57780a2a20aeabf9e8640acacc2dd570c8e2e4f4a300d15548cf405d168b7af",
+            "entry_hash": "c7be20ea7b1fcaed03828665cf349c193a464319bee18230acd0af6d18324265",
+            "signature": "4b84d0a330e25fb74cadb631da2fe492f74ddef74a0ce552ec6d5ae0379e00f5a9f54ae9ddb9ce68f0c19a40e655ada979be6b689c9be5e7c591bcc1c1b2f007"
+        },
+        {
+            "sequence_number": 4,
+            "timestamp": "2026-05-06T19:43:02.832824Z",
+            "event_type": "CLIPBOARD_COPY",
+            "severity": "INFO",
+            "source": "clipboard_service",
+            "user_id": "default",
+            "details": "{\"entry_id\": 1, \"data_type\": \"password\", \"auto_clear\": false}",
+            "previous_hash": "94548ce8f9cd37fb004246366c2ce2ea832d2ac5ad77d5ebbbd9971adaa26fbf",
+            "entry_hash": "b57780a2a20aeabf9e8640acacc2dd570c8e2e4f4a300d15548cf405d168b7af",
+            "signature": "e47a08d3e0033b84bec67683d355515cdd230fceb90c50453a11d21584c675ec60effeec4165cf0b375d1b4853bf23f002456fe68a8901be7ac26c677969960e"
+        },
+        {
+            "sequence_number": 3,
+            "timestamp": "2026-05-06T19:43:01.111059Z",
+            "event_type": "VAULT_CREATE",
+            "severity": "INFO",
+            "source": "vault_manager",
+            "user_id": "default",
+            "details": "{\"entry_id\": 2, \"action\": \"create\", \"service_name\": \"[REDACTED]\"}",
+            "previous_hash": "f21dbaab25b883925bb1c9c1ccaa9b87f6199432d11040b70b2884452343e42d",
+            "entry_hash": "94548ce8f9cd37fb004246366c2ce2ea832d2ac5ad77d5ebbbd9971adaa26fbf",
+            "signature": "cfec545503bd95483a5022cc2b0fb6571719ad76eb2500bf4b178d62d404bf6caf54c1665b6d94a8f8de9f18ef307b6bc039cef605994d6b92b82e4cc964a60b"
+        },
+        {
+            "sequence_number": 2,
+            "timestamp": "2026-05-06T19:42:34.155491Z",
+            "event_type": "VAULT_CREATE",
+            "severity": "INFO",
+            "source": "vault_manager",
+            "user_id": "default",
+            "details": "{\"entry_id\": 1, \"action\": \"create\", \"service_name\": \"[REDACTED]\"}",
+            "previous_hash": "ea1e690049418774e3bd05c080e618beb85e3c63ddaa905a89d132b761b11ecd",
+            "entry_hash": "f21dbaab25b883925bb1c9c1ccaa9b87f6199432d11040b70b2884452343e42d",
+            "signature": "8d8b14de516dd9950f4f869393f9243666f1accf34d473155ce8d2c972c38b02a69389f248260d779d5a815f6aae20a3855c015bbefc5b190f18599b2022d605"
+        },
+        {
+            "sequence_number": 1,
+            "timestamp": "2026-05-06T19:41:47.261646Z",
+            "event_type": "SYSTEM_GENESIS",
+            "severity": "INFO",
+            "source": "audit_logger",
+            "user_id": "system",
+            "details": "{\"message\": \"Audit log initialized\"}",
+            "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+            "entry_hash": "ea1e690049418774e3bd05c080e618beb85e3c63ddaa905a89d132b761b11ecd",
+            "signature": "5025fc7e2b30b8fab6fb77a400f329d6b7f3fb76b97018c014ab3f6cdc89d82f6c13f4399ef9899a97bd9b5546ffbaba6fe2cf98ed78188773648fb2a3585e00"
+        }
+    ]
+}

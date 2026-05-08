@@ -14,7 +14,7 @@ from src.core.audit.log_verifier import LogVerifier
 
 
 def test_performance():
-    print("=== AUDIT PERFORMANCE TEST (Sprint 5) ===")
+    print("AUDIT PERFORMANCE TEST ")
 
     # 1. Инициализация (используем отдельный файл БД для теста)
     test_db_path = "test_perf.db"
@@ -36,8 +36,8 @@ def test_performance():
     logger = AuditLogger(db, signer)
     logger.start()
 
-    # === TEST PERF-1: Logging Speed (< 10ms per op) ===
-    print("\n[TEST PERF-1] Testing logging speed for 100 entries...")
+    #  Logging Speed (< 10ms per op)
+    print("\n[TEST 1] Testing logging speed for 100 entries...")
     start_time = time.time()
 
     count = 100
@@ -56,8 +56,8 @@ def test_performance():
     else:
         print("❌ PERF-1 FAILED")
 
-    # === TEST PERF-3: Query Speed (< 500ms for 10k entries) ===
-    print("\n[TEST PERF-3] Testing query speed...")
+    # Query Speed (< 500ms for 10k entries) ===
+    print("\n[TEST 3] Testing query speed...")
     # Сначала заполним базу до 1000 записей (для демонстрации, 10к займет много времени)
     # В реальном тесте можно сгенерировать SQL INSERT напрямую для скорости
     print(f"Current DB size: {db.get_last_audit_entry()[0] if db.get_last_audit_entry() else 0}")
@@ -72,7 +72,7 @@ def test_performance():
     else:
         print("❌ PERF-3 FAILED")
 
-    # === TEST PERF-2: Verification Speed (< 1s for 1000 entries) ===
+    #  Verification Speed (< 1s for 1000 entries)
     print("\n[TEST PERF-2] Testing verification speed...")
     verifier = LogVerifier(db, signer)
 

@@ -3,17 +3,13 @@ import hashlib
 import threading
 import queue
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from src.core.events import event_bus, EventType
 
 
 class AuditLogger:
-    """
-    Центральный контроллер аудита.
-    Требования: ARC-2 (Decoupling), CRY-4 (Hash Chain), LOG-3 (Sanitization)
-    """
-
+    #Центральный контроллер аудита
     def __init__(self, db_helper, signer):
         self.db = db_helper
         self.signer = signer
@@ -25,7 +21,7 @@ class AuditLogger:
         self.running = False
 
     def start(self):
-        """Инициализация: проверка цепочки и создание Genesis-записи."""
+        #Инициализация: проверка цепочки и создание Genesis-записи
         if not self.signer.initialize():
             print("[Audit] Failed to initialize signer.")
             return
@@ -37,8 +33,7 @@ class AuditLogger:
         if not stored_key:
             self.db.save_audit_public_key(pub_key)
         elif stored_key != pub_key:
-            # Это случай, когда мастер-пароль сменен (Sprint 2 key rotation)
-            # Для Sprint 5 пока считаем, что ключ статичен, или обновляем его
+            # случай, когда мастер-пароль сменен
             print("[Audit] Warning: Audit signing key changed. Updating public key.")
             self.db.save_audit_public_key(pub_key)
 
@@ -57,7 +52,7 @@ class AuditLogger:
         print("[AuditLogger] Started with async worker thread.")
 
     def _log_worker(self):
-        """Фоновый поток для записи логов (PERF-5)."""
+        #Фоновый поток для записи логов
         while self.running:
             try:
                 # Получаем задачу из очереди с таймаутом
@@ -71,7 +66,7 @@ class AuditLogger:
                 print(f"[AuditLogger] Worker error: {e}")
 
     def stop(self):
-        """Остановка потока."""
+        #Остановка потока
         self.running = False
         if self.worker_thread:
             self.worker_thread.join(timeout=2.0)
@@ -79,13 +74,13 @@ class AuditLogger:
 
 
     def _subscribe_events(self):
-        """Подписка на глобальные события (ARC-2)."""
+        #Подписка на глобальные события
         # Хранилище
         event_bus.subscribe(EventType.VAULT_ENTRY_CREATED, self.on_vault_event)
         event_bus.subscribe(EventType.VAULT_ENTRY_UPDATED, self.on_vault_event)
         event_bus.subscribe(EventType.VAULT_ENTRY_DELETED, self.on_vault_event)
-        event_bus.subscribe(EventType.VAULT_ENTRY_READ, self.on_vault_event)  # Добавлено
-        event_bus.subscribe(EventType.VAULT_SEARCH_PERFORMED, self.on_vault_event)  # Добавлено
+        event_bus.subscribe(EventType.VAULT_ENTRY_READ, self.on_vault_event)
+        event_bus.subscribe(EventType.VAULT_SEARCH_PERFORMED, self.on_vault_event)
 
         # Аутентификация
         event_bus.subscribe(EventType.AUTH_LOGIN_SUCCESS, self.on_auth_event)
@@ -95,11 +90,11 @@ class AuditLogger:
         # Буфер обмена
         event_bus.subscribe(EventType.CLIPBOARD_COPY, self.on_clipboard_event)
         event_bus.subscribe(EventType.CLIPBOARD_CLEARED, self.on_clipboard_event)
-        event_bus.subscribe(EventType.CLIPBOARD_EXTERNAL_CHANGE, self.on_security_event)  # Добавлено
+        event_bus.subscribe(EventType.CLIPBOARD_EXTERNAL_CHANGE, self.on_security_event)
 
 
     def _create_genesis_entry(self):
-        """Создает первую запись в журнале (Start of Chain)."""
+        #Создает первую запись в журнале
         genesis_data = {
             'timestamp': datetime.utcnow().isoformat() + 'Z',
             'event_type': 'SYSTEM_GENESIS',
@@ -113,7 +108,7 @@ class AuditLogger:
 
     def _create_genesis_data(self):
         return {
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'timestamp': datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             'event_type': 'SYSTEM_GENESIS',
             'severity': 'INFO',
             'source': 'audit_logger',
@@ -124,13 +119,13 @@ class AuditLogger:
 
     def log_event(self, event_type: str, severity: str, source: str,
                   details: Dict[str, Any], user_id: str = 'default'):
-        """Публичный метод для ручного логирования событий."""
+        #Публичный метод для ручного логирования событий
         if not self._initialized:
             print("[Audit] Logger not initialized.")
             return
 
         entry_data = {
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'timestamp': datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             'event_type': event_type,
             'severity': severity,
             'source': source,
@@ -140,7 +135,7 @@ class AuditLogger:
         self.log_queue.put(entry_data)
 
     def on_vault_event(self, data: dict):
-        """Обработчик событий хранилища."""
+        #Обработчик событий хранилища
         event_type_map = {
             'create': ('VAULT_CREATE', 'INFO'),
             'update': ('VAULT_UPDATE', 'INFO'),
@@ -163,7 +158,7 @@ class AuditLogger:
             }
         )
     def on_auth_event(self, data: dict):
-        """Обработчик событий аутентификации."""
+        #обработчик событий аутентификации
         action = data.get('action', 'unknown')
         severity = 'WARN' if 'failure' in action or action == 'login_failure' else 'INFO'
 
@@ -173,20 +168,20 @@ class AuditLogger:
             source='auth_service',
             details={
                 'user_id': data.get('user_id', 'default'),
-                'reason': data.get('reason'), # Причина ошибки, если есть
-                'attempts': data.get('attempts') # Кол-во попыток, если есть
+                'reason': data.get('reason'), # Причина ошибки
+                'attempts': data.get('attempts') # Кол-во попыток
             }
         )
 
 
 
     def verify_integrity(self) -> bool:
-        """Проверка целостности цепочки (VER-1)."""
-        # Реализуем в следующем пункте (Log Verifier)
+        #Проверка целостности цепочки
+        # Реализуем в следующем пункте
         pass
 
     def on_clipboard_event(self, data: dict):
-        """Обработчик событий буфера обмена."""
+        #Обработчик событий буфера обмена
         action = data.get('action', 'copy')
         severity = 'WARN' if action == 'external_tamper' else 'INFO'
         self.log_event(
@@ -201,15 +196,9 @@ class AuditLogger:
         return {k: ("[REDACTED]" if any(s in k.lower() for s in sensitive_keys) else v) for k, v in details.items()}
 
     def _write_entry_sync(self, entry_data: Dict):
-        """Синхронная запись в БД (выполняется в рабочем потоке)."""
+        #Синхронная запись в БД (выполняется в рабочем потоке)
         try:
-            # Получаем хеш предыдущей записи
-            # Внимание: при асинхронной записи возможен race condition,
-            # если много логов пишется одновременно.
-            # Для высокой нагрузки нужно кэшировать последний хеш в памяти.
-            # Упрощенный вариант: берем из БД.
-
-            # Оптимизация: кэшируем последний хеш в памяти потока
+            #  кэшируем последний хеш в памяти потока
             if not hasattr(self, '_last_hash_cache'):
                 last_entry = self.db.get_last_audit_entry()
                 self._last_hash_cache = last_entry[1] if last_entry else '0' * 64
@@ -230,7 +219,7 @@ class AuditLogger:
             print(f"[AuditLogger] Error writing entry: {e}")
 
     def on_security_event(self, data: dict):
-        """Обработчик событий безопасности (Tampering, Policy Violations)"""
+        #Обработчик событий безопасности
         action = data.get('action', 'unknown')
         self.log_event(
             event_type=f"SECURITY_{action.upper()}",
@@ -241,10 +230,7 @@ class AuditLogger:
 
     @staticmethod
     def format_as_cef(entry: Dict[str, Any]) -> str:
-        """
-        Converts a log entry to Common Event Format (CEF) string.
-        CEF Header: CEF:Version|Device Vendor|Device Product|Device Version|Signature ID|Name|Severity|Extension
-        """
+        #Converts a log entry to Common Event Format (CEF) string.CEF Header: CEF:Version|Device Vendor|Device Product|Device Version|Signature ID|Name|Severity|Extension
         # Header constants
         cef_version = "0"
         device_vendor = "CryptoSafe"
