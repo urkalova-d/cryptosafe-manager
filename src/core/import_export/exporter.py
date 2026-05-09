@@ -1,27 +1,38 @@
 import os
 import json
 import base64
+import tempfile
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from .formats import JsonFormatHandler, CsvFormatHandler
 
 
 class VaultExporter:
     """
-    Отвечает за безопасный экспорт записей хранилища.
-    ARC-2: Использует отдельные ключи для экспорта (не мастер-ключ).
-    ARC-3: Поддерживает полный и выборочный экспорт.
+    Централизованный контроллер экспорта.
+    ARC-2: Key Separation.
+    EXP-4: Security & Audit.
     """
 
-    def __init__(self, entry_manager):
+    def __init__(self, entry_manager, audit_logger=None):
+        # ВАЖНО: добавили audit_logger=None
         self.entry_manager = entry_manager
+        self.audit_logger = audit_logger  # Сохраняем ссылку на логгер
 
+        # Инициализация хендлеров
+        self.handlers = {
+            'encrypted_json': JsonFormatHandler(),
+            'csv': CsvFormatHandler()
+        }
     def export_vault(self,
                      file_path: str,
                      password: str,
-                     entry_ids: Optional[List[int]] = None) -> bool:
+                     entry_ids: Optional[List[int]] = None,
+                     format_type: str = 'encrypted_json',
+                     options: Optional[Dict] = None) -> bool:
         """
         Основной метод экспорта.
 
@@ -33,47 +44,92 @@ class VaultExporter:
         Returns:
             bool: Успешность операции.
         """
+        options = options or {}
         try:
             # 1. Сбор данных (ARC-3)
             entries_data = self._collect_entries(entry_ids)
 
-            # 2. Формирование метаданных
-            export_payload = {
-                "version": "1.0",
-                "app": "CryptoSafe",
-                "exported_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                "count": len(entries_data),
-                "entries": entries_data
-            }
+            # 2. Фильтрация полей (EXP-3)
+            exclude_fields = options.get('exclude_fields', [])
+            if exclude_fields:
+                entries_data = self._filter_fields(entries_data, exclude_fields)
 
-            # 3. Шифрование (ARC-2 - генерируем отдельный ключ на базе пароля экспорта)
-            encrypted_package = self._encrypt_data(export_payload, password)
+            # 3. Выбор хендлера
+            handler = self.handlers.get(format_type)
+            if not handler:
+                raise ValueError(f"Unsupported format: {format_type}")
 
-            # 4. Запись в файл
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(encrypted_package, f, indent=4)
+            # 4. Генерация данных
+            # Используем временный файл для безопасности (EXP-4)
+            raw_data = handler.export_data(entries_data, password, options)
+
+            # 5. Запись в файл
+            self._write_secure(file_path, raw_data)
+
+            # 6. Логирование (EXP-4)
+            if self.audit_logger:
+                self.audit_logger.log_event(
+                    event_type="VAULT_EXPORT",
+                    severity="INFO",
+                    source="exporter",
+                    details={
+                        "format": format_type,
+                        "count": len(entries_data),
+                        "destination": os.path.basename(file_path)
+                    }
+                )
 
             return True
 
         except Exception as e:
             print(f"[Exporter Error] {e}")
+            # Логируем ошибку
+            if self.audit_logger:
+                self.audit_logger.log_event(
+                    event_type="VAULT_EXPORT_FAILED",
+                    severity="ERROR",
+                    source="exporter",
+                    details={"error": str(e)}
+                )
             raise e
 
     def _collect_entries(self, entry_ids: Optional[List[int]]) -> List[Dict]:
-        """Получает расшифрованные записи для экспорта."""
-        # Если список пуст, берем все записи из кэша или БД
+        """Получает расшифрованные записи."""
         if entry_ids is None:
-            # Получаем все записи через менеджер (они будут расшифрованы)
-            all_entries = self.entry_manager.get_all_entries()
-            return all_entries
+            return self.entry_manager.get_all_entries()
         else:
-            # Выборочный экспорт
             selected = []
             for eid in entry_ids:
                 entry = self.entry_manager.get_entry(eid)
                 if entry:
                     selected.append(entry)
             return selected
+
+    def _filter_fields(self, entries: List[Dict], exclude: List[str]) -> List[Dict]:
+        """Удаляет указанные поля из записей (EXP-3)."""
+        filtered = []
+        for entry in entries:
+            new_entry = {k: v for k, v in entry.items() if k not in exclude}
+            filtered.append(new_entry)
+        return filtered
+
+    def _write_secure(self, file_path: str, data: bytes):
+        """Безопасная запись в файл (EXP-4)."""
+        # Пишем во временный файл, затем переименовываем (атомарная операция)
+        temp_path = file_path + ".tmp"
+        try:
+            with open(temp_path, 'wb') as f:
+                f.write(data)
+
+            # Если файл существовал, удаляем его (или перезаписываем)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+            os.rename(temp_path, file_path)
+        except Exception as e:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)  # Очистка временных файлов при ошибке
+            raise e
 
     def _encrypt_data(self, data: Dict, password: str) -> Dict:
         """

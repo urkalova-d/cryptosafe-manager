@@ -255,7 +255,13 @@ class MainWindow(QMainWindow):
         file_menu = menubar.addMenu("Файл")
         file_menu.addAction("Создать")
         file_menu.addAction("Открыть")
-        file_menu.addAction("Резервное копирование")
+        backup_menu = file_menu.addMenu("Резервное копирование")
+
+        export_action = backup_menu.addAction("Экспорт хранилища")
+        export_action.triggered.connect(self.open_export_dialog)
+
+        import_action = backup_menu.addAction("Импорт хранилища")
+        import_action.triggered.connect(self.open_import_dialog)
 
         clear_clip_action = file_menu.addAction("Очистить буфер обмена")
         clear_clip_action.triggered.connect(self.manual_clear_clipboard)
@@ -1305,3 +1311,19 @@ class MainWindow(QMainWindow):
             self.auth_service.logout()
 
 
+    def open_export_dialog(self):
+        """Открывает диалог экспорта (UI-1)."""
+        from src.gui.export_dialog import ExportDialog
+
+        # Проверка аудита (он нужен для логирования экспорта)
+        if not self.audit_logger:
+            QMessageBox.warning(self, "Ошибка", "Система аудита не инициализирована.")
+            return
+
+        dialog = ExportDialog(self.entry_manager, self.audit_logger, self)
+        dialog.exec()
+
+
+    def open_import_dialog(self):
+        """Заглушка для импорта."""
+        QMessageBox.information(self, "В разработке", "Импорт будет реализован в следующем модуле.")
