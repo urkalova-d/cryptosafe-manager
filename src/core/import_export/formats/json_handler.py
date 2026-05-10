@@ -8,22 +8,17 @@ from datetime import datetime, timezone
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.exceptions import InvalidTag
 
 
 class JsonFormatHandler:
-    """
-    Обработчик родного формата CryptoSafe (Encrypted JSON).
-    EXP-1, EXP-2.
-    """
+    """Обработчик родного формата CryptoSafe (Encrypted JSON)."""
 
     def __init__(self):
         self.extension = ".csjson"
 
     def export_data(self, entries: list, password: str, options: dict) -> bytes:
-        """
-        Формирует и шифрует JSON пакет.
-        """
-        # 1. Подготовка payload
+        """Экспорт (из предыдущего шага)."""
         export_payload = {
             "version": "1.0",
             "app": "CryptoSafe",
@@ -32,36 +27,29 @@ class JsonFormatHandler:
             "entries": entries
         }
 
-        # 2. Опции
-        use_compression = options.get('compression', False)
-
-        # 3. Сериализация
         json_str = json.dumps(export_payload, ensure_ascii=False)
         plaintext = json_str.encode('utf-8')
 
-        # 4. Сжатие (EXP-3)
+        # Сжатие
+        use_compression = options.get('compression', False)
         if use_compression:
             plaintext = gzip.compress(plaintext)
 
-        # 5. Шифрование (EXP-2)
         encrypted_package = self._encrypt_payload(plaintext, password)
 
-        # 6. Integrity Hash (EXP-2)
-        # Хеш считается по исходным данным (для проверки при импорте)
+        # Integrity Hash
         integrity_hash = hashlib.sha256(json_str.encode('utf-8')).hexdigest()
         encrypted_package['integrity'] = {
             "hash": integrity_hash,
             "algorithm": "SHA256"
         }
 
-        # Возвращаем байты для записи в файл
         return json.dumps(encrypted_package).encode('utf-8')
 
     def _encrypt_payload(self, plaintext: bytes, password: str) -> dict:
         salt = os.urandom(16)
         nonce = os.urandom(12)
 
-        # Key Derivation (PBKDF2)
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
@@ -70,7 +58,6 @@ class JsonFormatHandler:
         )
         key = kdf.derive(password.encode('utf-8'))
 
-        # AES-256-GCM
         aesgcm = AESGCM(key)
         ciphertext = aesgcm.encrypt(nonce, plaintext, None)
 
@@ -84,3 +71,40 @@ class JsonFormatHandler:
             },
             "data": base64.b64encode(ciphertext).decode('ascii')
         }
+
+    def import_data(self, file_path: str, password: str) -> list:
+        """Импорт (новый функционал)."""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                package = json.load(f)
+
+            if not all(k in package for k in ['encryption', 'data']):
+                raise ValueError("Invalid CryptoSafe file structure.")
+
+            enc_info = package['encryption']
+            salt = base64.b64decode(enc_info['salt'])
+            nonce = base64.b64decode(enc_info['nonce'])
+            ciphertext = base64.b64decode(package['data'])
+
+            kdf = PBKDF2HMAC(
+                algorithm=hashes.SHA256(),
+                length=32,
+                salt=salt,
+                iterations=enc_info.get('iterations', 100000),
+            )
+            key = kdf.derive(password.encode('utf-8'))
+
+            aesgcm = AESGCM(key)
+            plaintext = aesgcm.decrypt(nonce, ciphertext, None)
+
+            # Распаковка (проверяем магические байты GZIP)
+            if plaintext[:2] == b'\x1f\x8b':
+                plaintext = gzip.decompress(plaintext)
+
+            data = json.loads(plaintext.decode('utf-8'))
+            return data.get('entries', [])
+
+        except InvalidTag:
+            raise ValueError("Неверный пароль или файл поврежден.")
+        except Exception as e:
+            raise ValueError(f"Ошибка чтения JSON: {e}")

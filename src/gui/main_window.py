@@ -1323,7 +1323,18 @@ class MainWindow(QMainWindow):
         dialog = ExportDialog(self.entry_manager, self.audit_logger, self)
         dialog.exec()
 
-
     def open_import_dialog(self):
-        """Заглушка для импорта."""
-        QMessageBox.information(self, "В разработке", "Импорт будет реализован в следующем модуле.")
+        """Открывает диалог импорта."""
+        if not self.auth_service.is_authenticated():
+            QMessageBox.warning(self, "Ошибка", "Сначала войдите в систему.")
+            return
+
+        from src.gui.import_dialog import ImportDialog
+
+        dialog = ImportDialog(self.entry_manager, self.audit_logger, self)
+        if dialog.exec():
+            # Если импорт прошел успешно, перезагружаем таблицу
+            self.load_data_from_db()
+
+
+
