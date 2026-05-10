@@ -1,4 +1,4 @@
-# src/core/import_export/formats/json_handler.py
+
 import json
 import base64
 import os
@@ -74,9 +74,13 @@ class JsonFormatHandler:
 
     def import_data(self, file_path: str, password: str) -> list:
         """Импорт (новый функционал)."""
+        if not password:
+            raise ValueError("Для импорта .csjson файлов требуется пароль.")
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 package = json.load(f)
+            if package.get('type') == 'cryptosafe_share':
+                return self._import_shared_package(package, password)
 
             if not all(k in package for k in ['encryption', 'data']):
                 raise ValueError("Invalid CryptoSafe file structure.")
@@ -108,3 +112,37 @@ class JsonFormatHandler:
             raise ValueError("Неверный пароль или файл поврежден.")
         except Exception as e:
             raise ValueError(f"Ошибка чтения JSON: {e}")
+
+    def _import_shared_package(self, package: dict, password: str) -> list:
+        """SHR-4: Расшифровка записи из режима Sharing."""
+        try:
+            method = package['method']
+            enc_info = package['encryption']
+
+            if method == 'password':
+                # Логика аналогична обычному экспорту
+                salt = base64.b64decode(enc_info['salt'])
+                nonce = base64.b64decode(enc_info['nonce'])
+                ciphertext = base64.b64decode(package['data'])
+
+                kdf = PBKDF2HMAC(
+                    algorithm=hashes.SHA256(),
+                    length=32,
+                    salt=salt,
+                    iterations=enc_info.get('iterations', 100000),
+                )
+                key = kdf.derive(password.encode('utf-8'))
+
+                aesgcm = AESGCM(key)
+                plaintext = aesgcm.decrypt(nonce, ciphertext, None)
+
+                entry_data = json.loads(plaintext.decode('utf-8'))
+                return [entry_data]  # Возвращаем список из одной записи
+
+            elif method == 'rsa_public_key':
+                # Для RSA требуется приватный ключ, это сложнее реализовать в GUI сразу
+                # Обычно это делается через отдельный диалог
+                raise ValueError("Импорт RSA-зашифрованных записей требует приватного ключа.")
+
+        except Exception as e:
+            raise ValueError(f"Ошибка расшифровки Shared Entry: {e}")

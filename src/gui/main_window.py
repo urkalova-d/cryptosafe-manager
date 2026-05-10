@@ -1342,7 +1342,7 @@ class MainWindow(QMainWindow):
             return
         try:
             from src.gui.share_dialog import ShareDialog
-            dialog = ShareDialog(self.entry_manager, entry_id, self)
+            dialog = ShareDialog(self.entry_manager, self.db_helper, entry_id, self)
             dialog.exec()
         except Exception as e:
             import traceback

@@ -34,6 +34,19 @@ class DatabaseHelper:
                                 last_used TIMESTAMP
                             )
                         """)
+            cursor.execute("""
+                            CREATE TABLE IF NOT EXISTS sharing_history (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                entry_id INTEGER,
+                                entry_name TEXT,
+                                recipient TEXT,
+                                method TEXT,
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                expires_at TIMESTAMP,
+                                status TEXT DEFAULT 'active'
+                            )
+                        """)
+
             # таблица аудита
             cursor.execute("""
                             CREATE TABLE IF NOT EXISTS audit_log (
