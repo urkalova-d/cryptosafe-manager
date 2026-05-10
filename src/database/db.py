@@ -23,7 +23,17 @@ class DatabaseHelper:
         with self._lock:
             cursor = self.conn.cursor()
 
-
+            # Таблица контактов для обмена ключами (QR-3)
+            cursor.execute("""
+                            CREATE TABLE IF NOT EXISTS contacts (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                name TEXT NOT NULL,
+                                public_key_pem TEXT NOT NULL,
+                                fingerprint TEXT NOT NULL,
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                last_used TIMESTAMP
+                            )
+                        """)
             # таблица аудита
             cursor.execute("""
                             CREATE TABLE IF NOT EXISTS audit_log (
