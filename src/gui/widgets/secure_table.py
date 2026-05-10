@@ -1,37 +1,36 @@
+# src/gui/widgets/secure_table.py
 from PyQt6.QtWidgets import (QTableWidget, QTableWidgetItem, QPushButton,
-                             QWidget, QHBoxLayout, QHeaderView, QApplication, QMenu, QAbstractItemView, QLabel)
+                             QWidget, QHBoxLayout, QHeaderView, QApplication,
+                             QMenu, QAbstractItemView, QLabel)
 from urllib.parse import urlparse
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
-from PyQt6.QtGui import QAction, QIcon,QColor
+from PyQt6.QtGui import QColor
 
 class SecureTable(QTableWidget):
-    # сигналы для связи с MainWindow
+    # --- Сигналы ---
     edit_requested = pyqtSignal(int)
     delete_requested = pyqtSignal(int)
     copy_password_requested = pyqtSignal(int)
     copy_username_requested = pyqtSignal(int)
     copy_all_requested = pyqtSignal(int)
+    share_requested = pyqtSignal(int)  # НОВЫЙ СИГНАЛ
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setColumnCount(6)
-        self.setHorizontalHeaderLabels(["Сервис", "Логин", "URL", "Категория", "Пароль",  "Действие"])
+        self.setHorizontalHeaderLabels(["Сервис", "Логин", "URL", "Категория", "Пароль", "Действие"])
 
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        # Настройки таблицы
         self.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)  # Multi-select
+        self.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.setAlternatingRowColors(True)
         self.verticalHeader().setVisible(False)
-        self.setSortingEnabled(True)  # Sortable
+        self.setSortingEnabled(True)
 
-        # Разрешаем изменение размеров колонок и перестановку
         self.horizontalHeader().setSectionsMovable(True)
         self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        # Растягиваем последнюю колонку
         self.horizontalHeader().setStretchLastSection(True)
 
-        # Устанавливаем ширину колонок по умолчанию
         self.setColumnWidth(0, 200)  # Сервис
         self.setColumnWidth(1, 150)  # Логин
         self.setColumnWidth(2, 200)  # URL
@@ -39,24 +38,19 @@ class SecureTable(QTableWidget):
         self.setColumnWidth(4, 120)  # Пароль
         self.setColumnWidth(5, 120)  # Действие
 
-        # Переменные для хранения состояния видимости
         self._passwords_visible = False
-        self._password_data = {}  # Храним ID -> пароль
-
+        self._password_data = {}
         self._active_clipboard_row = -1
 
-        #  Контекстное меню
+        # Контекстное меню
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self.show_context_menu)
 
     def add_record(self, service, login, category, password, notes, copy_callback=None, record_id=None,
                    modified_date=None, url="", password_getter=None):
-        #Добавление записи с маскировкой.
-
         row_position = self.rowCount()
         self.insertRow(row_position)
 
-        # Сохраняем метаданные строки в словарь
         self._password_data[row_position] = {
             'id': record_id,
             'visible': False,
@@ -64,14 +58,13 @@ class SecureTable(QTableWidget):
             'username': login
         }
 
-
-        #  Сервис
+        # Сервис
         item_service = QTableWidgetItem(str(service))
         if record_id:
             item_service.setData(Qt.ItemDataRole.UserRole, record_id)
         self.setItem(row_position, 0, item_service)
 
-        #  Логин (маскированный)
+        # Логин (маскированный)
         if len(str(login)) > 4:
             masked_login = str(login)[:4] + "••••"
         else:
@@ -80,42 +73,37 @@ class SecureTable(QTableWidget):
         item_login.setToolTip(str(login))
         self.setItem(row_position, 1, item_login)
 
-        #  URL
+        # URL
         domain = self._extract_domain(str(url))
         item_url = QTableWidgetItem(domain)
         item_url.setToolTip(str(url))
         self.setItem(row_position, 2, item_url)
 
-        #  Категория
+        # Категория
         self.setItem(row_position, 3, QTableWidgetItem(str(category)))
 
-        #  Пароль (всегда скрыт изначально)
+        # Пароль (скрыт)
         item_pass = QTableWidgetItem("••••••••")
         self.setItem(row_position, 4, item_pass)
 
-        #  Кнопки действий
+        # Кнопки действий
         container = QWidget()
         layout = QHBoxLayout(container)
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(2)
 
-        # Кнопка копирования пароля
         copy_pass_btn = QPushButton("🔑")
         copy_pass_btn.setToolTip("Копировать пароль")
         copy_pass_btn.setFixedSize(QSize(28, 24))
         if record_id is not None:
             copy_pass_btn.clicked.connect(lambda checked=False, eid=record_id: self.copy_password_requested.emit(eid))
-        else:
-            print(f"[SecureTable] Warning: record_id is None for row {row_position}")
 
-        # Кнопка копирования логина
         copy_user_btn = QPushButton("👤")
         copy_user_btn.setToolTip("Копировать логин")
         copy_user_btn.setFixedSize(QSize(28, 24))
         if record_id is not None:
             copy_user_btn.clicked.connect(lambda checked=False, eid=record_id: self.copy_username_requested.emit(eid))
 
-        # Кнопка показа
         toggle_btn = QPushButton("👁")
         toggle_btn.setToolTip("Показать/Скрыть")
         toggle_btn.setFixedSize(QSize(28, 24))
@@ -128,24 +116,19 @@ class SecureTable(QTableWidget):
 
         self.setCellWidget(row_position, 5, container)
 
-
-    # Индикация строки в буфере
     def highlight_row(self, entry_id):
-        #Подсвечивает строку, чей контент сейчас в буфере
         self._active_clipboard_row = -1
-        # Сброс подсветки всех строк
         for row in range(self.rowCount()):
             for col in range(self.columnCount()):
                 item = self.item(row, col)
                 if item:
-                    item.setBackground(Qt.GlobalColor.white)  # Или базовый цвет
+                    item.setBackground(Qt.GlobalColor.white)
 
-        # Поиск и подсветка нужной строки
         for row in range(self.rowCount()):
             data = self._password_data.get(row)
             if data and data['id'] == entry_id:
                 self._active_clipboard_row = row
-                highlight_color = QColor(230, 240, 255)  # Светло-голубой
+                highlight_color = QColor(230, 240, 255)
                 for col in range(self.columnCount()):
                     item = self.item(row, col)
                     if item:
@@ -153,7 +136,6 @@ class SecureTable(QTableWidget):
                 break
 
     def remove_highlight(self):
-        #Снимает подсветку при очистке буфера
         if self._active_clipboard_row != -1:
             for col in range(self.columnCount()):
                 item = self.item(self._active_clipboard_row, col)
@@ -161,17 +143,13 @@ class SecureTable(QTableWidget):
                     item.setBackground(Qt.GlobalColor.white)
             self._active_clipboard_row = -1
 
-
     def display_data(self, records, copy_callback=None, password_getter=None):
-        #Обновление таблицы при поиске
         self.secure_clear()
-        # Отключаем сортировку для ускорения вставки
         self.setSortingEnabled(False)
 
         for rec in records:
             service = rec.get('service', rec.get('title', 'Unknown'))
             login = rec.get('username', '')
-            # Пароль не передаем явно, используем геттер
             url = rec.get('url', '')
             category = rec.get('category', 'Uncategorized')
             notes = rec.get('notes', '')
@@ -198,8 +176,6 @@ class SecureTable(QTableWidget):
             return url
 
     def toggle_row_password(self, row):
-        #Безопасное переключение видимости пароля
-        # Проверяем валидность строки
         if row < 0 or row >= self.rowCount():
             return
 
@@ -211,11 +187,9 @@ class SecureTable(QTableWidget):
         if not item:
             return
 
-        # Переключаем флаг
         data['visible'] = not data['visible']
 
         if data['visible']:
-            # Показываем пароль через геттер (безопасность SEC-1)
             if data['getter'] and data['id']:
                 try:
                     real_pass = data['getter'](data['id'])
@@ -226,14 +200,10 @@ class SecureTable(QTableWidget):
             else:
                 item.setText("N/A")
         else:
-            # Скрываем пароль
             item.setText("••••••••")
 
     def toggle_all_passwords(self, visible: bool):
-        # переключение видимости
         self._passwords_visible = visible
-
-        # Блокируем сигналы для ускорения
         self.blockSignals(True)
 
         for row in range(self.rowCount()):
@@ -260,7 +230,6 @@ class SecureTable(QTableWidget):
         if not item:
             return
 
-        # Получаем ID записи из первого столбца выбранной строки
         row = item.row()
         id_item = self.item(row, 0)
         if not id_item:
@@ -270,12 +239,15 @@ class SecureTable(QTableWidget):
 
         menu = QMenu(self)
 
+        # Добавляем все действия
         copy_pass_action = menu.addAction("🔑 Копировать пароль")
         copy_user_action = menu.addAction("👤 Копировать логин")
         copy_all_action = menu.addAction("📋 Копировать всё")
         menu.addSeparator()
         edit_action = menu.addAction("✏️ Редактировать")
         delete_action = menu.addAction("🗑️ Удалить")
+        menu.addSeparator()
+        share_action = menu.addAction("🔗 Поделиться...")  # НОВОЕ ДЕЙСТВИЕ
 
         action = menu.exec(self.mapToGlobal(pos))
 
@@ -289,17 +261,14 @@ class SecureTable(QTableWidget):
             self.edit_requested.emit(record_id)
         elif action == delete_action:
             self.delete_requested.emit(record_id)
+        elif action == share_action:
+            self.share_requested.emit(record_id)  # НОВЫЙ СИГНАЛ
 
     def secure_clear(self):
-        #удаление изз памяти
         for row in self._password_data:
-            # заполнение 0
-            # удаление ссылки
             self._password_data[row] = ""
-
         self._password_data.clear()
         self.setRowCount(0)
 
     def clear(self):
-        #очистка
         self.secure_clear()

@@ -26,6 +26,7 @@ from src.core.clipboard import ClipboardService, PlatformAdapter, ClipboardMonit
 from src.core.audit import AuditLogger, AuditLogSigner
 from src.core.audit.log_verifier import LogVerifier
 from src.gui.audit_viewer import AuditViewer
+from src.gui.share_dialog import ShareDialog
 class LoadDataWorker(QObject):
     # Сигнал передает список расшифрованных записей
     finished = pyqtSignal(list)
@@ -143,7 +144,6 @@ class MainWindow(QMainWindow):
         if event.type() in [QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress]:
             if hasattr(self, 'auth_service') and self.auth_service.is_authenticated():
                 self.auth_service.update_activity()
-
         # Ctrl+V для эфемерного буфера
         if event.type() == QEvent.Type.KeyPress:
             if event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_V:
@@ -372,8 +372,9 @@ class MainWindow(QMainWindow):
         # сигналы контекстного меню
         self.table.edit_requested.connect(self.edit_entry_by_id)
         self.table.delete_requested.connect(self.delete_entry_by_id)
-        #self.table.copy_requested.connect(self.copy_to_clipboard)
 
+        # Включаем контекстное меню и подключаем к нашему слоту
+        self.table.share_requested.connect(self.open_share_dialog)
     def create_status_bar(self):
         self.status_bar = self.statusBar()
         self.status_bar.showMessage("Система готова")
@@ -1336,5 +1337,14 @@ class MainWindow(QMainWindow):
             # Если импорт прошел успешно, перезагружаем таблицу
             self.load_data_from_db()
 
-
-
+    def open_share_dialog(self, entry_id):
+        if not entry_id:
+            return
+        try:
+            from src.gui.share_dialog import ShareDialog
+            dialog = ShareDialog(self.entry_manager, entry_id, self)
+            dialog.exec()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось открыть диалог шаринга:\n{e}")

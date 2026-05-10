@@ -138,6 +138,7 @@ class VaultImporter:
         ext = os.path.splitext(file_path)[1].lower()
         if ext == '.csjson': return 'csjson'
         if ext == '.csv': return 'csv'
+        if ext == '.csshare': return 'csjson'
 
         # Попытка прочитать как JSON для Bitwarden
         try:

@@ -96,8 +96,12 @@ class ImportDialog(QDialog):
     def browse_file(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Выберите файл", "",
-            "All Supported (*.csjson *.csv *.json);;CryptoSafe (*.csjson);;CSV (*.csv);;JSON (*.json)"
-        )
+            "All Supported (*.csjson *.csv *.json *.csshare);;"
+            "CryptoSafe Backup (*.csjson);;"
+            "CryptoSafe Share (*.csshare);;"
+            "CSV (*.csv);;"
+            "JSON (*.json);;"
+            "All Files (*.*)")
         if path:
             self.selected_file_path = path
             self.file_label.setText(os.path.basename(path))
